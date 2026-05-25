@@ -1,0 +1,2080 @@
+// =============================================================================
+//  Sistema Fiscal-Financeiro — Schema Prisma
+//  Derivado do PRD v1.2 (modelo híbrido: NF-e direto SEFAZ + NFS-e via Focus)
+// =============================================================================
+//
+//  Convenções de modelagem aplicadas:
+//
+//  - Provider: PostgreSQL (suporta Decimal, JSON, enums, partial indexes)
+//  - Naming: PascalCase nos models, snake_case nas tabelas via @@map/@map
+//  - Money: Decimal(18, 6) — nunca Float em valores fiscais
+//  - Datas: DateTime em UTC; campos de "data fiscal" (dEmi, dhSaiEnt) em DateTime
+//  - IDs: UUID (cuid) em todas as entidades; chaves naturais (CNPJ, chaveAcesso)
+//         têm índice único separado quando aplicável
+//  - Multiempresa: companyId obrigatório em toda tabela transacional
+//  - Auditoria: createdAt/updatedAt/createdBy/updatedBy em entidades editáveis;
+//               trilha imutável separada em AuditLog (ADM-04 / RNF-11)
+//  - Parâmetros tributários versionados por vigência (validFrom/validTo) — CAD-05
+//  - Idempotência: idempotencyKey único em documentos fiscais — INT-02
+//  - Soft delete em CADASTROS (deletedAt); NUNCA em documentos fiscais
+//  - Enums para domínios fechados (status, finalidades, CRT, tipos de evento)
+//  - Índices em chave de acesso, NSU, datas de emissão e vencimento
+//
+//  Cobertura por seção do PRD:
+//    6.1 Cadastros Base ........... Company, Branch, Certificate, Customer,
+//                                   Supplier, Product, Service, NcmCode, etc.
+//    6.2 NF-e modelo 55 ........... NFe, NFeItem, NFeReferencia, NFeEvento,
+//                                   NumberingSeries, ContingencyBatch
+//    6.3 NFS-e .................... NFSe, NFSeItem, NFSeEvento
+//    6.4 Importação/Entradas ...... ReceivedDocument, DfeManifestation,
+//                                   NsuCursor, ReceivedDocumentVersion
+//    6.5 Compras .................. PurchaseOrder, PurchaseOrderItem
+//    6.6 Vendas ................... SalesOrder, SalesOrderItem, PriceList
+//    6.7 Financeiro ............... AccountReceivable, AccountPayable,
+//                                   Installment, BankAccount, BankTransaction,
+//                                   CashFlowEntry, EconfEvent
+//    6.8 Relatórios ............... (views/queries — sem novas tabelas)
+//    6.9 Administração ............ User, Role, Permission, UserRole, AuditLog,
+//                                   Webhook, IntegrationCredential, Notification
+//    7.x Integração fiscal ........ SefazTransmission, FocusRequest, Webhook
+// =============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearchPostgres"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+//  ENUMS — domínios fechados
+// =============================================================================
+
+/// Código de Regime Tributário (campo CRT do emitente)
+enum CodigoRegimeTributario {
+  SIMPLES_NACIONAL              // CRT 1
+  SIMPLES_EXCESSO_SUBLIMITE     // CRT 2
+  REGIME_NORMAL                 // CRT 3
+  MEI                           // CRT 4
+
+  @@map("crt")
+}
+
+enum TipoPessoa {
+  PF
+  PJ
+  ESTRANGEIRO
+
+  @@map("tipo_pessoa")
+}
+
+enum IndicadorIE {
+  CONTRIBUINTE              // 1
+  ISENTO                    // 2
+  NAO_CONTRIBUINTE          // 9
+
+  @@map("ind_ie")
+}
+
+/// Tipo de operação na NF-e (entrada/saída)
+enum TipoOperacao {
+  ENTRADA  // tpNF = 0
+  SAIDA    // tpNF = 1
+
+  @@map("tipo_operacao")
+}
+
+/// Finalidade da emissão da NF-e (incluindo novas finalidades de ajuste)
+enum FinalidadeNFe {
+  NORMAL              // finNFe = 1
+  COMPLEMENTAR        // finNFe = 2
+  AJUSTE              // finNFe = 3
+  DEVOLUCAO           // finNFe = 4
+  NOTA_CREDITO        // RT — nova finalidade
+  NOTA_DEBITO         // RT — nova finalidade
+
+  @@map("finalidade_nfe")
+}
+
+enum AmbienteSefaz {
+  HOMOLOGACAO  // tpAmb = 2
+  PRODUCAO     // tpAmb = 1
+
+  @@map("ambiente_sefaz")
+}
+
+enum FormaEmissao {
+  NORMAL              // tpEmis = 1
+  CONTINGENCIA_FSDA   // tpEmis = 2
+  CONTINGENCIA_SCAN   // tpEmis = 3
+  CONTINGENCIA_EPEC   // tpEmis = 4
+  CONTINGENCIA_FSDA_OUTRA // tpEmis = 5
+  CONTINGENCIA_SVC_AN // tpEmis = 6
+  CONTINGENCIA_SVC_RS // tpEmis = 7
+  OFFLINE_NFCE        // tpEmis = 9
+
+  @@map("forma_emissao")
+}
+
+/// Estado interno do documento — máquina de estados unificada (INT-03)
+enum DocumentStatus {
+  DRAFT               // rascunho (ainda não enviado)
+  PENDING             // enfileirado para envio
+  SUBMITTED           // enviado, aguardando processamento
+  PROCESSING          // SEFAZ/Focus em processamento (cStat 105)
+  AUTHORIZED          // autorizado (cStat 100 para NF-e)
+  REJECTED            // rejeitado pelo autorizador (cStat de rejeição)
+  DENIED              // denegado (cStat 110, 301, 302)
+  CANCELLED           // cancelado por evento
+  INUTILIZED          // numeração inutilizada
+  ERROR               // erro de integração (não fiscal)
+
+  @@map("document_status")
+}
+
+/// Tipo de Documento Fiscal Eletrônico
+enum TipoDFe {
+  NFE_55
+  NFCE_65
+  NFSE_MUNICIPAL
+  NFSE_NACIONAL
+  CTE_57
+  CTE_67_OS
+  MDFE_58
+  NFCOM
+  DCE
+
+  @@map("tipo_dfe")
+}
+
+/// Tipos de evento da NF-e (cancelamento, CC-e, ECONF, manifestação, etc)
+enum TipoEventoNFe {
+  CANCELAMENTO           // tpEvento 110111
+  CARTA_CORRECAO         // tpEvento 110110
+  EPEC                   // tpEvento 110140
+  CIENCIA_OPERACAO       // tpEvento 210210
+  CONFIRMACAO_OPERACAO   // tpEvento 210200
+  DESCONHECIMENTO        // tpEvento 210220
+  OPERACAO_NAO_REALIZADA // tpEvento 210240
+  ATOR_INTERESSADO       // tpEvento 110150
+  INSUCESSO_ENTREGA      // tpEvento 110192
+  ECONF                  // tpEvento 112110 — Conciliação Financeira
+  COMPROVANTE_ENTREGA    // tpEvento 110130
+
+  @@map("tipo_evento_nfe")
+}
+
+/// Caminho de emissão (decisão arquitetural do modelo híbrido — Seção 7.1)
+enum CaminhoEmissao {
+  SEFAZ_DIRETO   // NF-e e recepção de DF-e
+  FOCUS_NFE      // NFS-e (Nacional e municipal)
+
+  @@map("caminho_emissao")
+}
+
+/// CST de IBS/CBS (Reforma Tributária — RT 2025.002)
+enum CstIbsCbs {
+  TRIBUTACAO_INTEGRAL        // 000
+  REDUCAO_ALIQUOTA           // 200
+  REDUCAO_BASE_CALCULO       // 210
+  DIFERIMENTO                // 410
+  SUSPENSAO                  // 510
+  ISENCAO                    // 610
+  IMUNIDADE                  // 620
+  NAO_INCIDENCIA             // 630
+  CREDITO_PRESUMIDO          // 800
+
+  @@map("cst_ibs_cbs")
+}
+
+/// Tipo de retenção em serviços (NFS-e)
+enum TipoRetencaoIss {
+  SEM_RETENCAO
+  RETIDO_TOMADOR
+  RETIDO_INTERMEDIARIO
+
+  @@map("tipo_retencao_iss")
+}
+
+/// Indicador de operação na DPS/NFS-e (cIndOp)
+enum IndicadorOperacaoNFSe {
+  TRIBUTADO              // 1
+  ALIQUOTA_ZERO          // 2
+  IMUNE                  // 3
+  ISENTO                 // 4
+  NAO_INCIDENCIA         // 5
+
+  @@map("ind_op_nfse")
+}
+
+/// Manifestação do destinatário — tipo de resposta
+enum TipoManifestacao {
+  CIENCIA_OPERACAO
+  CONFIRMACAO_OPERACAO
+  DESCONHECIMENTO_OPERACAO
+  OPERACAO_NAO_REALIZADA
+
+  @@map("tipo_manifestacao")
+}
+
+/// Tipo de documento financeiro
+/// (mantido como tabelas separadas AccountReceivable/AccountPayable — sem enum)
+
+enum StatusTitulo {
+  ABERTO
+  PARCIAL
+  LIQUIDADO
+  CANCELADO
+  RENEGOCIADO
+
+  @@map("status_titulo")
+}
+
+enum MeioPagamento {
+  DINHEIRO              // 01
+  CHEQUE                // 02
+  CARTAO_CREDITO        // 03
+  CARTAO_DEBITO         // 04
+  CREDITO_LOJA          // 05
+  VALE_ALIMENTACAO      // 10
+  VALE_REFEICAO         // 11
+  VALE_PRESENTE         // 12
+  VALE_COMBUSTIVEL      // 13
+  BOLETO                // 15
+  DEPOSITO_BANCARIO     // 16
+  PIX                   // 17
+  TRANSFERENCIA_BANCARIA // 18
+  CASHBACK              // 19
+  SEM_PAGAMENTO         // 90
+  OUTROS                // 99
+
+  @@map("meio_pagamento")
+}
+
+enum StatusPedido {
+  RASCUNHO
+  APROVADO
+  PARCIAL_RECEBIDO
+  RECEBIDO
+  PARCIAL_FATURADO
+  FATURADO
+  CANCELADO
+
+  @@map("status_pedido")
+}
+
+enum TipoMovimentacaoEstoque {
+  ENTRADA
+  SAIDA
+  AJUSTE_POSITIVO
+  AJUSTE_NEGATIVO
+  TRANSFERENCIA
+
+  @@map("tipo_mov_estoque")
+}
+
+/// Tipo de credencial externa (cofre de segredos)
+enum TipoCredencial {
+  FOCUS_NFE_TOKEN
+  CERTIFICADO_DIGITAL_A1
+  CERTIFICADO_DIGITAL_A3
+  BANCO_API
+  PSP_API
+
+  @@map("tipo_credencial")
+}
+
+enum StatusWebhook {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+  DUPLICATED
+
+  @@map("status_webhook")
+}
+
+// =============================================================================
+//  ADMINISTRAÇÃO, SEGURANÇA E MULTIEMPRESA — Seção 6.9
+// =============================================================================
+
+/// Tenant raiz (organização que opera o sistema; pode conter várias Companies)
+model Tenant {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  companies   Company[]
+  users       User[]
+
+  @@map("tenants")
+}
+
+/// Empresa emitente (CNPJ); pode ter múltiplas filiais (Branches)
+/// ADM-01 — segregação total de dados por empresa
+model Company {
+  id                  String                  @id @default(cuid())
+  tenantId            String                  @map("tenant_id")
+  cnpj                String                  @unique
+  razaoSocial         String                  @map("razao_social")
+  nomeFantasia        String?                 @map("nome_fantasia")
+  ie                  String?                 // Inscrição Estadual
+  im                  String?                 // Inscrição Municipal
+  crt                 CodigoRegimeTributario
+  cnae                String?
+  regimeEspecial      String?                 @map("regime_especial")
+
+  // Endereço da matriz
+  logradouro          String
+  numero              String
+  complemento         String?
+  bairro              String
+  codigoMunicipioIbge String                  @map("codigo_municipio_ibge")
+  municipio           String
+  uf                  String                  @db.Char(2)
+  cep                 String
+  telefone            String?
+  email               String?
+
+  // Configurações fiscais
+  ambienteSefaz       AmbienteSefaz           @default(HOMOLOGACAO) @map("ambiente_sefaz")
+  ambienteFocusNfe    AmbienteSefaz           @default(HOMOLOGACAO) @map("ambiente_focus_nfe")
+  emiteNfe            Boolean                 @default(true) @map("emite_nfe")
+  emiteNfse           Boolean                 @default(true) @map("emite_nfse")
+
+  // Flags de habilitação tributária — controlam quais grupos de cálculo se aplicam à empresa.
+  // Permite que empresas com perfis fiscais diferentes coexistam no mesmo schema sem migrações
+  // (mercearia intraestadual ≠ indústria com ST ≠ distribuidor interestadual).
+  usaIcms             Boolean                 @default(true) @map("usa_icms")
+  usaIcmsSt           Boolean                 @default(false) @map("usa_icms_st")
+  usaIpi              Boolean                 @default(false) @map("usa_ipi") // típico de indústria
+  usaDifal            Boolean                 @default(false) @map("usa_difal") // operações interestaduais B2C
+  usaFcp              Boolean                 @default(false) @map("usa_fcp") // Fundo de Combate à Pobreza
+  usaIcmsDesonerado   Boolean                 @default(false) @map("usa_icms_desonerado") // isenção/redução com desoneração
+
+  active              Boolean                 @default(true)
+  createdAt           DateTime                @default(now()) @map("created_at")
+  updatedAt           DateTime                @updatedAt @map("updated_at")
+  deletedAt           DateTime?               @map("deleted_at")
+
+  tenant              Tenant                  @relation(fields: [tenantId], references: [id])
+  branches            Branch[]
+  certificates        Certificate[]
+  credentials         IntegrationCredential[]
+  customers           Customer[]
+  suppliers           Supplier[]
+  products            Product[]
+  services            Service[]
+  numberingSeries     NumberingSeries[]
+  nfes                NFe[]
+  nfses               NFSe[]
+  receivedDocuments   ReceivedDocument[]
+  nsuCursors          NsuCursor[]
+  salesOrders         SalesOrder[]
+  purchaseOrders      PurchaseOrder[]
+  bankAccounts        BankAccount[]
+  receivables         AccountReceivable[]
+  payables            AccountPayable[]
+  taxRules            TaxRule[]
+  taxParameters       TaxParameter[]
+  webhooks            Webhook[]
+  webhookEvents       WebhookEvent[]
+  sefazTransmissions  SefazTransmission[]
+  focusRequests       FocusRequest[]
+  contingencyBatches  ContingencyBatch[]
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+
+  @@index([tenantId])
+  @@index([cnpj])
+  @@map("companies")
+}
+
+/// Filial (estabelecimento secundário com CNPJ próprio sob o mesmo grupo)
+model Branch {
+  id           String   @id @default(cuid())
+  companyId    String   @map("company_id")
+  cnpj         String   @unique
+  ie           String?
+  nome         String
+  logradouro   String
+  numero       String
+  complemento  String?
+  bairro       String
+  municipio    String
+  uf           String   @db.Char(2)
+  cep          String
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  company      Company  @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
+  @@map("branches")
+}
+
+/// Certificado digital A1/A3 da empresa (NF-e) — custodiado em cofre
+/// SEF-03/SEF-04 — armazenamento criptografado, isolado por empresa, com alerta de expiração
+model Certificate {
+  id              String   @id @default(cuid())
+  companyId       String   @map("company_id")
+  alias           String
+  tipo            String   // "A1" ou "A3"
+  subject         String   // Subject do certificado (CN, OU, etc)
+  serialNumber    String   @map("serial_number")
+  thumbprint      String   @unique
+  validFrom       DateTime @map("valid_from")
+  validTo         DateTime @map("valid_to")
+
+  /// Referência opaca ao cofre (vault path, KMS key ID etc) — nunca o certificado em si
+  vaultRef        String   @map("vault_ref")
+
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  company         Company  @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, active])
+  @@index([validTo]) // para alerta de expiração
+  @@map("certificates")
+}
+
+/// Credenciais externas (tokens Focus NF-e, APIs bancárias etc) — referência ao cofre
+/// ADM-06 / RNF-10 — nunca expor o segredo na coluna; apenas o vaultRef
+model IntegrationCredential {
+  id           String         @id @default(cuid())
+  companyId    String         @map("company_id")
+  tipo         TipoCredencial
+  ambiente     AmbienteSefaz
+  vaultRef     String         @map("vault_ref")
+  metadata     Json?          // não-segredos (ex.: tenant_id do provedor)
+  active       Boolean        @default(true)
+  rotatedAt    DateTime?      @map("rotated_at")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  company      Company        @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, tipo, ambiente])
+  @@index([companyId])
+  @@map("integration_credentials")
+}
+
+// -----------------------------------------------------------------------------
+//  RBAC — usuários, papéis, permissões — ADM-02
+// -----------------------------------------------------------------------------
+
+model User {
+  id           String     @id @default(cuid())
+  tenantId     String     @map("tenant_id")
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  fullName     String     @map("full_name")
+  active       Boolean    @default(true)
+  mfaEnabled   Boolean    @default(false) @map("mfa_enabled")
+  mfaSecret    String?    @map("mfa_secret") // armazenar criptografado
+  lastLoginAt  DateTime?  @map("last_login_at")
+  failedLogins Int        @default(0) @map("failed_logins")
+  lockedUntil  DateTime?  @map("locked_until")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  tenant       Tenant     @relation(fields: [tenantId], references: [id])
+  userRoles    UserRole[]
+  auditLogs    AuditLog[]
+  notifications Notification[]
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  tenantId    String           @map("tenant_id")
+  name        String
+  description String?
+  system      Boolean          @default(false) // perfis pré-definidos não editáveis
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@unique([tenantId, name])
+  @@map("roles")
+}
+
+model Permission {
+  id          String           @id @default(cuid())
+  /// Código semântico, ex: "nfe.emit", "nfe.cancel", "fin.payable.write"
+  code        String           @unique
+  description String
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id")
+  permissionId String     @map("permission_id")
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+/// Vínculo usuário-papel escopado por empresa (suporta acesso a múltiplas empresas)
+model UserRole {
+  userId     String   @map("user_id")
+  roleId     String   @map("role_id")
+  companyId  String?  @map("company_id") // null = aplica a todas as empresas do tenant
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId, companyId])
+  @@index([userId])
+  @@map("user_roles")
+}
+
+// -----------------------------------------------------------------------------
+//  Auditoria, Notificações e Webhooks — ADM-04, ADM-07, ADM-09
+// -----------------------------------------------------------------------------
+
+/// Trilha de auditoria imutável (somente INSERT) — RNF-11
+model AuditLog {
+  id          String   @id @default(cuid())
+  companyId   String?  @map("company_id")
+  userId      String?  @map("user_id")
+  action      String   // ex: "nfe.emit", "nfe.cancel", "user.login"
+  entityType  String   @map("entity_type")
+  entityId    String?  @map("entity_id")
+  ipAddress   String?  @map("ip_address")
+  userAgent   String?  @map("user_agent")
+  /// Snapshot antes/depois e metadados de contexto
+  payload     Json?
+  occurredAt  DateTime @default(now()) @map("occurred_at")
+
+  company     Company? @relation(fields: [companyId], references: [id])
+  user        User?    @relation(fields: [userId], references: [id])
+
+  @@index([companyId, occurredAt])
+  @@index([entityType, entityId])
+  @@index([userId, occurredAt])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  companyId   String   @map("company_id")
+  userId      String?  @map("user_id") // null = broadcast para a empresa
+  category    String   // "rejection", "cert_expiry", "manifest_pending", etc.
+  title       String
+  message     String
+  severity    String   @default("info") // info | warn | error
+  readAt      DateTime? @map("read_at")
+  link        String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  company     Company  @relation(fields: [companyId], references: [id])
+  user        User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId, readAt])
+  @@index([companyId, category])
+  @@map("notifications")
+}
+
+/// Configuração de webhook (Focus NF-e nos envia notificações; podemos receber outras)
+model Webhook {
+  id           String         @id @default(cuid())
+  companyId    String         @map("company_id")
+  source       String         // "focus_nfe", "psp", etc.
+  url          String         // nosso endpoint receptor (URL pública)
+  secret       String         // segredo HMAC para validar assinatura
+  active       Boolean        @default(true)
+  /// ID retornado pelo provedor quando cadastramos o webhook lá
+  externalId   String?        @map("external_id")
+  events       String[]       // tipos de evento subscritos
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  company      Company        @relation(fields: [companyId], references: [id])
+  events_log   WebhookEvent[]
+
+  @@unique([companyId, source])
+  @@map("webhooks")
+}
+
+/// Evento recebido (idempotência: dedupe pelo eventId do provedor)
+/// FNF-03 / INT-02 — processamento idempotente
+model WebhookEvent {
+  id           String        @id @default(cuid())
+  companyId    String        @map("company_id")
+  webhookId    String        @map("webhook_id")
+  source       String        // "focus_nfe", "sefaz_async", etc.
+  /// ID único fornecido pelo emissor (Idempotency-Key); usado para dedupe
+  externalEventId String     @map("external_event_id")
+  eventType    String        @map("event_type")
+  payload      Json
+  signature    String?
+  status       StatusWebhook @default(PENDING)
+  attempts     Int           @default(0)
+  lastError    String?       @map("last_error")
+  receivedAt   DateTime      @default(now()) @map("received_at")
+  processedAt  DateTime?     @map("processed_at")
+
+  webhook      Webhook       @relation(fields: [webhookId], references: [id])
+  company      Company       @relation(fields: [companyId], references: [id])
+
+  @@unique([source, externalEventId]) // dedupe global por origem
+  @@index([companyId, status])
+  @@index([receivedAt])
+  @@map("webhook_events")
+}
+
+// =============================================================================
+//  CADASTROS BASE — Seção 6.1
+// =============================================================================
+
+/// Cliente (pessoa física ou jurídica)
+model Customer {
+  id                  String     @id @default(cuid())
+  companyId           String     @map("company_id")
+  tipoPessoa          TipoPessoa @map("tipo_pessoa")
+  cnpjCpf             String     @map("cnpj_cpf")
+  nomeRazao           String     @map("nome_razao")
+  nomeFantasia        String?    @map("nome_fantasia")
+  ie                  String?
+  indicadorIE         IndicadorIE @map("indicador_ie")
+  im                  String?
+  suframa             String?
+  email               String?
+  telefone            String?
+
+  // Atributos fiscais do destinatário — relevantes para cálculo correto de operações interestaduais,
+  // ICMS-ST, DIFAL e tributos da Reforma. Sem isso, não é possível decidir a tributação no momento da emissão.
+  /// Regime tributário do destinatário (afeta DIFAL, partilha e tratamento de ST)
+  crtDestinatario     CodigoRegimeTributario? @map("crt_destinatario")
+  /// Indica se o destinatário é consumidor final (indFinal da NF-e): 0=Não, 1=Sim.
+  /// Determina aplicabilidade do DIFAL quando combinado com operação interestadual.
+  consumidorFinal     Boolean    @default(false) @map("consumidor_final")
+  /// Indicador de presença do comprador (indPres da NF-e): 0=N/A, 1=Presencial, 2=Internet, 9=Outros
+  indicadorPresenca   Int?       @map("indicador_presenca")
+
+  // Endereço
+  logradouro          String
+  numero              String
+  complemento         String?
+  bairro              String
+  codigoMunicipioIbge String     @map("codigo_municipio_ibge")
+  municipio           String
+  uf                  String     @db.Char(2)
+  cep                 String
+  /// Para destinatários no exterior (cPais)
+  pais                String?    @default("Brasil")
+  codigoPais          String?    @map("codigo_pais") @default("1058")
+
+  // Comercial
+  limiteCredito       Decimal?   @map("limite_credito") @db.Decimal(18, 2)
+  bloqueado           Boolean    @default(false)
+
+  active              Boolean    @default(true)
+  createdAt           DateTime   @default(now()) @map("created_at")
+  updatedAt           DateTime   @updatedAt @map("updated_at")
+  deletedAt           DateTime?  @map("deleted_at")
+
+  company             Company    @relation(fields: [companyId], references: [id])
+  salesOrders         SalesOrder[]
+  nfes                NFe[]
+  nfses               NFSe[]
+  receivables         AccountReceivable[]
+
+  @@unique([companyId, cnpjCpf])
+  @@index([companyId, nomeRazao])
+  @@map("customers")
+}
+
+model Supplier {
+  id                  String     @id @default(cuid())
+  companyId           String     @map("company_id")
+  tipoPessoa          TipoPessoa @map("tipo_pessoa")
+  cnpjCpf             String     @map("cnpj_cpf")
+  nomeRazao           String     @map("nome_razao")
+  nomeFantasia        String?    @map("nome_fantasia")
+  ie                  String?
+  indicadorIE         IndicadorIE @map("indicador_ie")
+  /// Regime tributário do fornecedor (afeta apropriação de crédito de IBS/CBS,
+  /// crédito presumido em entradas do Simples e tratamento de ST retido anteriormente)
+  crtFornecedor       CodigoRegimeTributario? @map("crt_fornecedor")
+  email               String?
+  telefone            String?
+
+  logradouro          String
+  numero              String
+  complemento         String?
+  bairro              String
+  codigoMunicipioIbge String     @map("codigo_municipio_ibge")
+  municipio           String
+  uf                  String     @db.Char(2)
+  cep                 String
+
+  active              Boolean    @default(true)
+  createdAt           DateTime   @default(now()) @map("created_at")
+  updatedAt           DateTime   @updatedAt @map("updated_at")
+  deletedAt           DateTime?  @map("deleted_at")
+
+  company             Company    @relation(fields: [companyId], references: [id])
+  purchaseOrders      PurchaseOrder[]
+  receivedDocuments   ReceivedDocument[]
+  payables            AccountPayable[]
+
+  @@unique([companyId, cnpjCpf])
+  @@index([companyId, nomeRazao])
+  @@map("suppliers")
+}
+
+/// Produto (item de mercadoria com tributação)
+/// CAD-02 — NCM, CEST, GTIN, origem, e amarração tributária por vigência
+model Product {
+  id              String        @id @default(cuid())
+  companyId       String        @map("company_id")
+  codigo          String        // SKU interno
+  codigoBarras    String?       @map("codigo_barras") // GTIN/EAN
+  descricao       String
+  ncm             String        // 8 dígitos
+  cest            String?       // 7 dígitos quando aplicável
+  origem          Int           // 0..8 conforme tabela ICMS
+  unidadeComercial String       @map("unidade_comercial") @db.VarChar(6)
+  unidadeTributavel String      @map("unidade_tributavel") @db.VarChar(6)
+  pesoLiquido     Decimal?      @map("peso_liquido") @db.Decimal(15, 3)
+  pesoBruto       Decimal?      @map("peso_bruto") @db.Decimal(15, 3)
+  controlaEstoque Boolean       @default(true) @map("controla_estoque")
+  estoqueAtual    Decimal       @default(0) @map("estoque_atual") @db.Decimal(15, 3)
+
+  active          Boolean       @default(true)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  deletedAt       DateTime?     @map("deleted_at")
+
+  company         Company       @relation(fields: [companyId], references: [id])
+  taxRules        ProductTaxRule[]
+  nfeItems        NFeItem[]
+  salesItems      SalesOrderItem[]
+  purchaseItems   PurchaseOrderItem[]
+  stockMoves      StockMovement[]
+  priceListItems  PriceListItem[]
+
+  @@unique([companyId, codigo])
+  @@index([companyId, ncm])
+  @@index([codigoBarras])
+  @@map("products")
+}
+
+/// Movimentação de estoque (entrada por NF de compra, saída por NF de venda, ajustes)
+model StockMovement {
+  id            String                  @id @default(cuid())
+  productId     String                  @map("product_id")
+  tipo          TipoMovimentacaoEstoque
+  quantidade    Decimal                 @db.Decimal(15, 3)
+  saldoApos     Decimal                 @map("saldo_apos") @db.Decimal(15, 3)
+  origemTipo    String                  @map("origem_tipo") // "nfe", "nfe_recebida", "ajuste"
+  origemId      String                  @map("origem_id")
+  observacao    String?
+  createdAt     DateTime                @default(now()) @map("created_at")
+  createdBy     String?                 @map("created_by")
+
+  product       Product                 @relation(fields: [productId], references: [id])
+
+  @@index([productId, createdAt])
+  @@index([origemTipo, origemId])
+  @@map("stock_movements")
+}
+
+/// Serviço (para NFS-e)
+/// CAD-03 — código de tributação nacional/municipal, item da lista de serviços
+model Service {
+  id                  String   @id @default(cuid())
+  companyId           String   @map("company_id")
+  codigo              String
+  descricao           String
+  /// Código de tributação nacional (cTribNac) — NFS-e Nacional
+  codigoTributacaoNacional String? @map("codigo_tributacao_nacional")
+  /// Código do item da lista de serviços (LC 116/2003 + atualizações)
+  itemListaServico    String   @map("item_lista_servico")
+  /// Código tributário municipal (varia por município)
+  codigoTributacaoMunicipal String? @map("codigo_tributacao_municipal")
+  /// CNAE relacionado
+  cnae                String?
+
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+  deletedAt           DateTime? @map("deleted_at")
+
+  company             Company  @relation(fields: [companyId], references: [id])
+  taxRules            ServiceTaxRule[]
+  nfseItems           NFSeItem[]
+
+  @@unique([companyId, codigo])
+  @@index([companyId, itemListaServico])
+  @@map("services")
+}
+
+// -----------------------------------------------------------------------------
+//  Tabelas auxiliares oficiais (cache local versionado) — CAD-08
+// -----------------------------------------------------------------------------
+
+model NcmCode {
+  codigo    String   @id @db.VarChar(8)
+  descricao String
+  validFrom DateTime @map("valid_from")
+  validTo   DateTime? @map("valid_to")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([validFrom, validTo])
+  @@map("ncm_codes")
+}
+
+model CfopCode {
+  codigo      String   @id @db.VarChar(4)
+  descricao   String
+  /// Indica entrada ou saída (primeiro dígito 1-3 = entrada; 5-7 = saída)
+  tipo        TipoOperacao
+
+  @@map("cfop_codes")
+}
+
+model CnaeCode {
+  codigo    String @id
+  descricao String
+
+  @@map("cnae_codes")
+}
+
+model Municipio {
+  codigoIbge String @id @map("codigo_ibge") @db.VarChar(7)
+  nome       String
+  uf         String @db.Char(2)
+
+  @@index([uf, nome])
+  @@map("municipios")
+}
+
+// =============================================================================
+//  MOTOR TRIBUTÁRIO PARAMETRIZÁVEL — CAD-05, CAD-06
+//  Tabelas versionadas por vigência (validFrom/validTo)
+// =============================================================================
+
+/// Regra tributária genérica (cabeçalho)
+/// Aplicável a operações (UF origem/destino, CFOP, regime, tipo de operação)
+model TaxRule {
+  id              String   @id @default(cuid())
+  companyId       String   @map("company_id")
+  nome            String
+  descricao       String?
+  /// Condições de aplicação (JSON: UF origem/destino, CFOP, CRT, tipo operação, etc)
+  condicoes       Json
+  /// Cálculos (JSON: alíquotas, bases, deduções)
+  calculos        Json
+  prioridade      Int      @default(100)
+  validFrom       DateTime @map("valid_from")
+  validTo         DateTime? @map("valid_to")
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  company         Company  @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, validFrom, validTo, active])
+  @@map("tax_rules")
+}
+
+/// Parâmetro tributário versionado (alíquotas IBS/CBS/IS, ICMS por UF, etc)
+/// CAD-05 / CAD-06 / Conformidade Seção 9
+model TaxParameter {
+  id          String   @id @default(cuid())
+  companyId   String?  @map("company_id") // null = global do tenant
+  chave       String   // ex: "IBS_ALIQUOTA_UF_SP", "CBS_ALIQUOTA_PADRAO"
+  valor       Json     // pode ser número, string ou estrutura
+  /// Referência à Nota Técnica/dispositivo (RT 2025.002, NT 007/2026, etc)
+  fonteNorma  String?  @map("fonte_norma")
+  validFrom   DateTime @map("valid_from")
+  validTo     DateTime? @map("valid_to")
+  createdAt   DateTime @default(now()) @map("created_at")
+  createdBy   String?  @map("created_by")
+
+  company     Company? @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, chave, validFrom])
+  @@index([chave, validFrom, validTo])
+  @@map("tax_parameters")
+}
+
+/// Amarração tributária por produto, versionada.
+/// Carrega o regime antigo (transição 2026-2032) e a Reforma (IBS/CBS/IS) em paralelo.
+/// Campos opcionais cobrem cenários específicos (ICMS-ST, redução de base, IPI por valor fixo)
+/// e ficam NULL para empresas que não os utilizam (controlado pelas flags em Company).
+model ProductTaxRule {
+  id              String     @id @default(cuid())
+  productId       String     @map("product_id")
+
+  // -------- ICMS próprio (regime antigo) --------
+  /// CST de ICMS na transição (00..90) — para emitente do regime normal
+  cstIcms         String?    @map("cst_icms")
+  /// CSOSN — Código de Situação da Operação no Simples Nacional (101..900)
+  csosnIcms       String?    @map("csosn_icms")
+  aliqIcms        Decimal?   @map("aliq_icms") @db.Decimal(7, 4)
+  /// Modalidade de determinação da BC do ICMS (modBC): 0=MVA, 1=Pauta, 2=Tabelado, 3=Valor da operação
+  modBC           Int?       @map("mod_bc")
+  /// Percentual de redução da base de cálculo do ICMS (pRedBC)
+  pRedBC          Decimal?   @map("p_red_bc") @db.Decimal(7, 4)
+  /// Indica se o produto é importado (origem 1, 2, 3, 6, 7, 8) — força alíquota interestadual de 4%
+  importado       Boolean    @default(false)
+
+  // -------- ICMS Substituição Tributária --------
+  /// CST/CSOSN aplicável quando há ST (10, 30, 60, 70, 90 com ST; CSOSN 201, 202, 203, 500, 900)
+  cstIcmsSt       String?    @map("cst_icms_st")
+  /// Modalidade de determinação da BC do ICMS-ST (modBCST):
+  /// 0=Preço tabelado, 1=Lista negativa, 2=Lista positiva, 3=Lista neutra, 4=MVA, 5=Pauta, 6=Valor operação
+  modBCST         Int?       @map("mod_bc_st")
+  /// MVA padrão (pMVAST) — pode ser sobrescrito por IcmsStMva quando houver regra por UF/NCM
+  pMVAST          Decimal?   @map("p_mvast") @db.Decimal(7, 4)
+  /// Redução da base de cálculo da ST (pRedBCST)
+  pRedBCST        Decimal?   @map("p_red_bc_st") @db.Decimal(7, 4)
+  /// Alíquota efetiva da ST (pICMSST) — quando aplicada diretamente sem cálculo por MVA
+  pICMSST         Decimal?   @map("p_icmsst") @db.Decimal(7, 4)
+  /// Alíquota efetiva quando ICMS é desonerado (pICMSEfet)
+  pICMSEfetivo    Decimal?   @map("p_icms_efetivo") @db.Decimal(7, 4)
+
+  // -------- ICMS desonerado (isenção/redução com desoneração) --------
+  /// Motivo da desoneração do ICMS (motDesICMS): 1=Táxi, 3=Produtor agropecuário, ... 9=Outros, 16=Olimpíadas etc.
+  motDesICMS      Int?       @map("mot_des_icms")
+
+  // -------- FCP (Fundo de Combate à Pobreza) --------
+  /// Alíquota de FCP padrão do produto (pFCP) — pode variar por UF de destino via TaxParameter
+  pFCP            Decimal?   @map("p_fcp") @db.Decimal(7, 4)
+  /// Alíquota de FCP retido por ST (pFCPST)
+  pFCPST          Decimal?   @map("p_fcpst") @db.Decimal(7, 4)
+  /// Alíquota de FCP retido anteriormente (pFCPSTRet)
+  pFCPSTRet       Decimal?   @map("p_fcpst_ret") @db.Decimal(7, 4)
+
+  // -------- IPI --------
+  /// CST de IPI
+  cstIpi          String?    @map("cst_ipi")
+  /// Código de Enquadramento Legal do IPI (cEnq)
+  cEnq            String?    @map("c_enq")
+  /// Alíquota de IPI (pIPI)
+  aliqIpi         Decimal?   @map("aliq_ipi") @db.Decimal(7, 4)
+  /// IPI por valor unitário (qUnid + vUnid) quando aplicável a produtos específicos (cigarros, bebidas)
+  ipiPorUnidade   Boolean    @default(false) @map("ipi_por_unidade")
+  vUnidIpi        Decimal?   @map("v_unid_ipi") @db.Decimal(15, 4)
+
+  // -------- PIS / COFINS (regime antigo, até 2026/2027) --------
+  cstPis          String?    @map("cst_pis")
+  aliqPis         Decimal?   @map("aliq_pis") @db.Decimal(7, 4)
+  cstCofins       String?    @map("cst_cofins")
+  aliqCofins      Decimal?   @map("aliq_cofins") @db.Decimal(7, 4)
+  /// PIS/COFINS por valor unitário (alíquotas específicas)
+  pisCofinsPorUnidade Boolean @default(false) @map("pis_cofins_por_unidade")
+  vUnidPis        Decimal?   @map("v_unid_pis") @db.Decimal(15, 4)
+  vUnidCofins     Decimal?   @map("v_unid_cofins") @db.Decimal(15, 4)
+
+  // -------- IBS / CBS / IS (Reforma — RT 2025.002) --------
+  /// CST de IBS/CBS (Reforma) e Código de Classificação Tributária
+  cstIbsCbs       CstIbsCbs? @map("cst_ibs_cbs")
+  cClassTrib      String?    @map("c_class_trib")
+  /// Alíquotas específicas do produto (se sobrescrever a alíquota padrão da UF/município)
+  aliqIbsProduto  Decimal?   @map("aliq_ibs_produto") @db.Decimal(7, 4)
+  aliqCbsProduto  Decimal?   @map("aliq_cbs_produto") @db.Decimal(7, 4)
+  cstIs           String?    @map("cst_is")
+  aliqIs          Decimal?   @map("aliq_is") @db.Decimal(7, 4)
+  /// Indica se sofre incidência do Imposto Seletivo
+  incidenciaIs    Boolean    @default(false) @map("incidencia_is")
+
+  // -------- Vigência e auditoria --------
+  validFrom       DateTime   @map("valid_from")
+  validTo         DateTime?  @map("valid_to")
+  createdAt       DateTime   @default(now()) @map("created_at")
+
+  product         Product    @relation(fields: [productId], references: [id])
+
+  @@index([productId, validFrom, validTo])
+  @@map("product_tax_rules")
+}
+
+// -----------------------------------------------------------------------------
+//  Tributação interestadual e Substituição Tributária
+//  Tabelas globais alimentadas por normas oficiais (Senado, Confaz, Sefaz por UF)
+//  Não dependem de produto específico — são tabelas de referência versionadas.
+// -----------------------------------------------------------------------------
+
+/// Alíquota interestadual de ICMS por par (UF origem, UF destino).
+/// Resolução do Senado 22/89 (7%/12%) e 13/2012 (4% para importados).
+/// Fonte da verdade para o cálculo de operações interestaduais e do DIFAL.
+model InterstateAliquot {
+  id           String   @id @default(cuid())
+  ufOrigem     String   @map("uf_origem") @db.Char(2)
+  ufDestino    String   @map("uf_destino") @db.Char(2)
+  /// Alíquota aplicável a mercadorias nacionais (7% ou 12%)
+  aliqNacional Decimal  @map("aliq_nacional") @db.Decimal(7, 4)
+  /// Alíquota aplicável a mercadorias importadas (atualmente 4% — Res. Senado 13/2012)
+  aliqImportado Decimal @map("aliq_importado") @db.Decimal(7, 4)
+  validFrom    DateTime @map("valid_from")
+  validTo      DateTime? @map("valid_to")
+  fonteNorma   String?  @map("fonte_norma")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([ufOrigem, ufDestino, validFrom])
+  @@index([ufOrigem, ufDestino, validFrom, validTo])
+  @@map("interstate_aliquots")
+}
+
+/// Alíquota interna de ICMS por UF (usada para cálculo de DIFAL e como referência).
+/// Cada UF tem alíquota geral e podem existir alíquotas específicas por NCM/produto
+/// (modeladas via ProductTaxRule.aliqIcms quando sobrescrevem).
+model IcmsInternaUf {
+  id           String   @id @default(cuid())
+  uf           String   @db.Char(2)
+  /// Alíquota geral interna (ex.: 18% em SP, 20% em RJ, 17% em MG)
+  aliqInterna  Decimal  @map("aliq_interna") @db.Decimal(7, 4)
+  /// Alíquota geral de FCP (Fundo de Combate à Pobreza) interna da UF
+  aliqFcp      Decimal? @map("aliq_fcp") @db.Decimal(7, 4)
+  validFrom    DateTime @map("valid_from")
+  validTo      DateTime? @map("valid_to")
+  fonteNorma   String?  @map("fonte_norma")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([uf, validFrom])
+  @@index([uf, validFrom, validTo])
+  @@map("icms_interna_uf")
+}
+
+/// MVA (Margem de Valor Agregado) para ICMS-ST por par (UF origem, UF destino, NCM).
+/// Alimentada por protocolos e convênios Confaz. Sobrescreve o pMVAST do produto quando há regra específica.
+/// Suporta MVA ajustada para operações interestaduais (Convênio ICMS 35/2011).
+model IcmsStMva {
+  id             String   @id @default(cuid())
+  ufOrigem       String   @map("uf_origem") @db.Char(2)
+  ufDestino      String   @map("uf_destino") @db.Char(2)
+  ncm            String   @db.VarChar(8)
+  /// Descrição/segmento (ex.: "Autopeças", "Bebidas alcoólicas")
+  descricao      String?
+  /// MVA original (interna)
+  mvaOriginal    Decimal  @map("mva_original") @db.Decimal(7, 4)
+  /// MVA ajustada para interestadual (calculada conforme Convênio 35/2011)
+  mvaAjustada4   Decimal? @map("mva_ajustada_4") @db.Decimal(7, 4)  // quando origem=importado (4%)
+  mvaAjustada7   Decimal? @map("mva_ajustada_7") @db.Decimal(7, 4)  // quando interestadual=7%
+  mvaAjustada12  Decimal? @map("mva_ajustada_12") @db.Decimal(7, 4) // quando interestadual=12%
+  protocolo      String?
+  validFrom      DateTime @map("valid_from")
+  validTo        DateTime? @map("valid_to")
+  fonteNorma     String?  @map("fonte_norma")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([ufOrigem, ufDestino, ncm, validFrom])
+  @@index([ufDestino, ncm, validFrom, validTo])
+  @@map("icms_st_mva")
+}
+
+/// Benefícios fiscais por UF e produto (isenções, reduções, créditos presumidos)
+/// que dependem da operação. Cobertura de cenários específicos como Zona Franca,
+/// benefícios setoriais (automotivo, agronegócio), e regimes especiais por UF.
+model BeneficioFiscalUf {
+  id            String   @id @default(cuid())
+  uf            String   @db.Char(2)
+  ncm           String?  @db.VarChar(8) // null = aplicável a qualquer NCM
+  codBeneficio  String   @map("cod_beneficio") // cBenef da NF-e
+  descricao     String
+  /// Tipo do benefício: ISENCAO | REDUCAO_BASE | REDUCAO_ALIQUOTA | CREDITO_PRESUMIDO | DIFERIMENTO
+  tipo          String
+  /// Percentual aplicado (redução de base, alíquota efetiva, crédito presumido)
+  percentual    Decimal? @db.Decimal(7, 4)
+  validFrom     DateTime @map("valid_from")
+  validTo       DateTime? @map("valid_to")
+  fonteNorma    String?  @map("fonte_norma")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([uf, ncm, validFrom, validTo])
+  @@map("beneficios_fiscais_uf")
+}
+
+model ServiceTaxRule {
+  id              String     @id @default(cuid())
+  serviceId       String     @map("service_id")
+  /// CST de ISS (transição)
+  cstIss          String?    @map("cst_iss")
+  aliqIss         Decimal?   @map("aliq_iss") @db.Decimal(7, 4)
+  tipoRetencao    TipoRetencaoIss @default(SEM_RETENCAO) @map("tipo_retencao")
+  /// IBS/CBS (Reforma)
+  cstIbsCbs       CstIbsCbs? @map("cst_ibs_cbs")
+  cClassTrib      String?    @map("c_class_trib")
+  cIndOp          IndicadorOperacaoNFSe? @map("c_ind_op")
+  /// PIS/COFINS/CSLL retidos (regime antigo)
+  cstPis          String?    @map("cst_pis")
+  cstCofins       String?    @map("cst_cofins")
+  retemPisCofins  Boolean    @default(false) @map("retem_pis_cofins")
+  retemCsll       Boolean    @default(false) @map("retem_csll")
+  validFrom       DateTime   @map("valid_from")
+  validTo         DateTime?  @map("valid_to")
+
+  service         Service    @relation(fields: [serviceId], references: [id])
+
+  @@index([serviceId, validFrom, validTo])
+  @@map("service_tax_rules")
+}
+
+// =============================================================================
+//  NUMERAÇÃO E CONTINGÊNCIA — NFE-08, SEF-06, SEF-10
+// =============================================================================
+
+/// Controle próprio de numeração por empresa, modelo e série
+/// NFE-08 — reserva transacional para evitar duplicidade em concorrência
+model NumberingSeries {
+  id            String   @id @default(cuid())
+  companyId     String   @map("company_id")
+  modelo        String   @db.VarChar(2) // "55", "65", "57"...
+  serie         Int
+  proximoNumero BigInt   @map("proximo_numero")
+  ultimoUsado   BigInt?  @map("ultimo_usado")
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  company       Company  @relation(fields: [companyId], references: [id])
+  inutilizacoes NumberInutilization[]
+
+  @@unique([companyId, modelo, serie])
+  @@map("numbering_series")
+}
+
+/// Inutilização de faixa de numeração (NFE / SEF-10)
+model NumberInutilization {
+  id            String        @id @default(cuid())
+  seriesId      String        @map("series_id")
+  numeroInicial BigInt        @map("numero_inicial")
+  numeroFinal   BigInt        @map("numero_final")
+  justificativa String
+  ano           Int
+  status        DocumentStatus @default(PENDING)
+  protocolo     String?
+  enviadoEm     DateTime?     @map("enviado_em")
+  homologadoEm  DateTime?     @map("homologado_em")
+  retornoXml    String?       @map("retorno_xml") @db.Text
+  createdAt     DateTime      @default(now()) @map("created_at")
+  createdBy     String?       @map("created_by")
+
+  series        NumberingSeries @relation(fields: [seriesId], references: [id])
+
+  @@index([seriesId])
+  @@map("number_inutilizations")
+}
+
+/// Lote de contingência (EPEC, SVC) — SEF-06
+model ContingencyBatch {
+  id            String        @id @default(cuid())
+  companyId     String        @map("company_id")
+  formaEmissao  FormaEmissao  @map("forma_emissao")
+  motivoEntrada String        @map("motivo_entrada")
+  iniciadoEm    DateTime      @map("iniciado_em")
+  finalizadoEm  DateTime?     @map("finalizado_em")
+  status        String        @default("ABERTO") // ABERTO | EM_REPROCESSAMENTO | CONCLUIDO
+  observacoes   String?
+
+  company       Company       @relation(fields: [companyId], references: [id])
+  nfes          NFe[]
+
+  @@index([companyId, status])
+  @@map("contingency_batches")
+}
+
+// =============================================================================
+//  NF-e MODELO 55 — Seção 6.2 (Direto SEFAZ — SEF-01..SEF-12)
+// =============================================================================
+
+model NFe {
+  id                  String        @id @default(cuid())
+  companyId           String        @map("company_id")
+  customerId          String?       @map("customer_id")
+
+  // Identificação fiscal
+  numero              BigInt
+  serie               Int
+  modelo              String        @default("55") @db.VarChar(2)
+  /// Chave de acesso (44 dígitos) — única por DF-e autorizado
+  chaveAcesso         String?       @unique @map("chave_acesso")
+  dhEmissao           DateTime      @map("dh_emissao")
+  dhSaiEnt            DateTime?     @map("dh_sai_ent")
+  tipoOperacao        TipoOperacao  @map("tipo_operacao")
+  finalidade          FinalidadeNFe @default(NORMAL)
+  naturezaOperacao    String        @map("natureza_operacao")
+  ambiente            AmbienteSefaz
+  formaEmissao        FormaEmissao  @default(NORMAL) @map("forma_emissao")
+  contingencyBatchId  String?       @map("contingency_batch_id")
+
+  // Status interno
+  status              DocumentStatus @default(DRAFT)
+  /// Idempotência fim a fim — INT-02
+  idempotencyKey      String        @unique @map("idempotency_key")
+
+  // Retorno SEFAZ
+  cStat               String?       @map("c_stat") // ex: "100", "101", "110"
+  xMotivo             String?       @map("x_motivo")
+  protocoloAutorizacao String?      @map("protocolo_autorizacao")
+  dhAutorizacao       DateTime?     @map("dh_autorizacao")
+  nProtCancelamento   String?       @map("n_prot_cancelamento")
+  dhCancelamento      DateTime?     @map("dh_cancelamento")
+
+  // Totais (calculados a partir dos itens)
+  valorProdutos       Decimal       @default(0) @map("valor_produtos") @db.Decimal(18, 2)
+  valorFrete          Decimal       @default(0) @map("valor_frete") @db.Decimal(18, 2)
+  valorSeguro         Decimal       @default(0) @map("valor_seguro") @db.Decimal(18, 2)
+  valorDesconto       Decimal       @default(0) @map("valor_desconto") @db.Decimal(18, 2)
+  valorOutros         Decimal       @default(0) @map("valor_outros") @db.Decimal(18, 2)
+  valorTotal          Decimal       @default(0) @map("valor_total") @db.Decimal(18, 2)
+
+  // Totais de tributos (regime antigo — transição)
+  baseIcms            Decimal       @default(0) @map("base_icms") @db.Decimal(18, 2)
+  valorIcms           Decimal       @default(0) @map("valor_icms") @db.Decimal(18, 2)
+  valorIcmsDeson      Decimal       @default(0) @map("valor_icms_deson") @db.Decimal(18, 2)
+  baseIcmsST          Decimal       @default(0) @map("base_icms_st") @db.Decimal(18, 2)
+  valorIcmsST         Decimal       @default(0) @map("valor_icms_st") @db.Decimal(18, 2)
+  // FCP (próprio, ST e ST retido anteriormente)
+  valorFCP            Decimal       @default(0) @map("valor_fcp") @db.Decimal(18, 2)
+  valorFCPST          Decimal       @default(0) @map("valor_fcp_st") @db.Decimal(18, 2)
+  valorFCPSTRet       Decimal       @default(0) @map("valor_fcp_st_ret") @db.Decimal(18, 2)
+  // DIFAL (vICMSUFDest e vICMSUFRemet são totais por documento)
+  valorICMSUFDest     Decimal       @default(0) @map("valor_icms_uf_dest") @db.Decimal(18, 2)
+  valorICMSUFRemet    Decimal       @default(0) @map("valor_icms_uf_remet") @db.Decimal(18, 2)
+  valorFCPUFDest      Decimal       @default(0) @map("valor_fcp_uf_dest") @db.Decimal(18, 2)
+  // Demais tributos
+  valorIpi            Decimal       @default(0) @map("valor_ipi") @db.Decimal(18, 2)
+  valorIpiDevol       Decimal       @default(0) @map("valor_ipi_devol") @db.Decimal(18, 2)
+  valorPis            Decimal       @default(0) @map("valor_pis") @db.Decimal(18, 2)
+  valorPisST          Decimal       @default(0) @map("valor_pis_st") @db.Decimal(18, 2)
+  valorCofins         Decimal       @default(0) @map("valor_cofins") @db.Decimal(18, 2)
+  valorCofinsST       Decimal       @default(0) @map("valor_cofins_st") @db.Decimal(18, 2)
+  valorII             Decimal       @default(0) @map("valor_ii") @db.Decimal(18, 2) // Imposto de Importação
+  valorTotTrib        Decimal       @default(0) @map("valor_tot_trib") @db.Decimal(18, 2) // Lei da Transparência
+
+  // Totais IBS/CBS/IS — Reforma (NFE-21)
+  baseIbsCbs          Decimal       @default(0) @map("base_ibs_cbs") @db.Decimal(18, 2)
+  valorIbs            Decimal       @default(0) @map("valor_ibs") @db.Decimal(18, 2)
+  valorCbs            Decimal       @default(0) @map("valor_cbs") @db.Decimal(18, 2)
+  valorIs             Decimal       @default(0) @map("valor_is") @db.Decimal(18, 2)
+
+  // Indicadores de operação interestadual (tirados do destinatário + UFs no momento da emissão)
+  /// Indica que a operação cruza fronteiras estaduais
+  operacaoInterestadual Boolean     @default(false) @map("operacao_interestadual")
+  /// UF de destino quando interestadual (cacheado para apuração rápida)
+  ufDestino             String?     @map("uf_destino") @db.Char(2)
+
+  // Armazenamento dos artefatos
+  xmlAssinado         String?       @map("xml_assinado") @db.Text
+  xmlAutorizado       String?       @map("xml_autorizado") @db.Text
+  /// URL/path do PDF do DANFE armazenado
+  danfeUrl            String?       @map("danfe_url")
+
+  // Observações
+  infCpl              String?       @map("inf_cpl") @db.Text
+  infAdFisco          String?       @map("inf_ad_fisco") @db.Text
+
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
+  createdBy           String?       @map("created_by")
+  updatedBy           String?       @map("updated_by")
+
+  company             Company       @relation(fields: [companyId], references: [id])
+  customer            Customer?     @relation(fields: [customerId], references: [id])
+  contingencyBatch    ContingencyBatch? @relation(fields: [contingencyBatchId], references: [id])
+
+  items               NFeItem[]
+  referencias         NFeReferencia[]
+  eventos             NFeEvento[]
+  pagamentos          NFePagamento[]
+  transmissoes        SefazTransmission[]
+  receivables         AccountReceivable[]
+  econfEvents         EconfEvent[]
+  salesOrder          SalesOrder?   @relation("salesOrderNfe")
+
+  @@unique([companyId, modelo, serie, numero])
+  @@index([companyId, dhEmissao])
+  @@index([companyId, status])
+  @@index([customerId])
+  @@map("nfes")
+}
+
+/// Item da NF-e — com tributação completa (transição + Reforma) por item
+/// NFE-20/21 — CST e cClassTrib por item; IBS/CBS/IS por item
+model NFeItem {
+  id              String     @id @default(cuid())
+  nfeId           String     @map("nfe_id")
+  productId       String?    @map("product_id")
+  numeroItem      Int        @map("numero_item")
+  codigo          String
+  descricao       String
+  ncm             String
+  cest            String?
+  cfop            String     @db.VarChar(4)
+  unidadeComercial String    @map("unidade_comercial") @db.VarChar(6)
+  quantidadeComercial Decimal @map("quantidade_comercial") @db.Decimal(15, 4)
+  valorUnitario   Decimal    @map("valor_unitario") @db.Decimal(21, 10)
+  valorTotal      Decimal    @map("valor_total") @db.Decimal(18, 2)
+  valorDesconto   Decimal    @default(0) @map("valor_desconto") @db.Decimal(18, 2)
+  valorFrete      Decimal    @default(0) @map("valor_frete") @db.Decimal(18, 2)
+  valorSeguro     Decimal    @default(0) @map("valor_seguro") @db.Decimal(18, 2)
+  valorOutros     Decimal    @default(0) @map("valor_outros") @db.Decimal(18, 2)
+
+  // Tributação regime antigo — ICMS próprio
+  cstIcms         String?    @map("cst_icms")
+  csosnIcms       String?    @map("csosn_icms") // para emitentes do Simples (CRT 1/2)
+  origemMercadoria Int?      @map("origem_mercadoria") // 0..8
+  modBC           Int?       @map("mod_bc")
+  baseIcms        Decimal?   @map("base_icms") @db.Decimal(18, 2)
+  pRedBC          Decimal?   @map("p_red_bc") @db.Decimal(7, 4)
+  aliqIcms        Decimal?   @map("aliq_icms") @db.Decimal(7, 4)
+  valorIcms       Decimal?   @map("valor_icms") @db.Decimal(18, 2)
+  /// Código de Benefício Fiscal (cBenef) quando aplicável
+  cBenef          String?    @map("c_benef")
+
+  // ICMS desonerado (motDesICMS + vICMSDeson)
+  motDesICMS      Int?       @map("mot_des_icms")
+  valorIcmsDeson  Decimal?   @map("valor_icms_deson") @db.Decimal(18, 2)
+
+  // ICMS-ST (Substituição Tributária)
+  cstIcmsSt       String?    @map("cst_icms_st")
+  modBCST         Int?       @map("mod_bc_st")
+  pMVAST          Decimal?   @map("p_mvast") @db.Decimal(7, 4)
+  pRedBCST        Decimal?   @map("p_red_bc_st") @db.Decimal(7, 4)
+  baseIcmsST      Decimal?   @map("base_icms_st") @db.Decimal(18, 2)
+  aliqIcmsST      Decimal?   @map("aliq_icms_st") @db.Decimal(7, 4)
+  valorIcmsST     Decimal?   @map("valor_icms_st") @db.Decimal(18, 2)
+  // ST retido anteriormente (operação subsequente)
+  baseIcmsSTRet   Decimal?   @map("base_icms_st_ret") @db.Decimal(18, 2)
+  valorIcmsSTRet  Decimal?   @map("valor_icms_st_ret") @db.Decimal(18, 2)
+  pSTRet          Decimal?   @map("p_st_ret") @db.Decimal(7, 4)
+
+  // FCP — Fundo de Combate à Pobreza
+  baseFCP         Decimal?   @map("base_fcp") @db.Decimal(18, 2)
+  pFCP            Decimal?   @map("p_fcp") @db.Decimal(7, 4)
+  valorFCP        Decimal?   @map("valor_fcp") @db.Decimal(18, 2)
+  // FCP retido por ST
+  baseFCPST       Decimal?   @map("base_fcp_st") @db.Decimal(18, 2)
+  pFCPST          Decimal?   @map("p_fcp_st") @db.Decimal(7, 4)
+  valorFCPST      Decimal?   @map("valor_fcp_st") @db.Decimal(18, 2)
+  // FCP retido anteriormente
+  baseFCPSTRet    Decimal?   @map("base_fcp_st_ret") @db.Decimal(18, 2)
+  pFCPSTRet       Decimal?   @map("p_fcp_st_ret") @db.Decimal(7, 4)
+  valorFCPSTRet   Decimal?   @map("valor_fcp_st_ret") @db.Decimal(18, 2)
+
+  // DIFAL — Diferencial de Alíquotas em operações interestaduais para consumidor final
+  // (grupo ICMSUFDest da NF-e). Preenchido apenas quando a operação é interestadual + consumidor final.
+  baseICMSUFDest  Decimal?   @map("base_icms_uf_dest") @db.Decimal(18, 2)
+  baseFCPUFDest   Decimal?   @map("base_fcp_uf_dest") @db.Decimal(18, 2)
+  pFCPUFDest      Decimal?   @map("p_fcp_uf_dest") @db.Decimal(7, 4)
+  pICMSUFDest     Decimal?   @map("p_icms_uf_dest") @db.Decimal(7, 4) // alíquota interna da UF de destino
+  pICMSInter      Decimal?   @map("p_icms_inter") @db.Decimal(7, 4)   // alíquota interestadual (4%, 7% ou 12%)
+  /// Percentual de partilha entre UF origem e UF destino (100% a partir de 2019, mas mantido para histórico)
+  pICMSInterPart  Decimal?   @map("p_icms_inter_part") @db.Decimal(7, 4)
+  valorFCPUFDest  Decimal?   @map("valor_fcp_uf_dest") @db.Decimal(18, 2)
+  valorICMSUFDest Decimal?   @map("valor_icms_uf_dest") @db.Decimal(18, 2)
+  valorICMSUFRemet Decimal?  @map("valor_icms_uf_remet") @db.Decimal(18, 2)
+
+  // IPI
+  cstIpi          String?    @map("cst_ipi")
+  cEnq            String?    @map("c_enq")
+  baseIpi         Decimal?   @map("base_ipi") @db.Decimal(18, 2)
+  aliqIpi         Decimal?   @map("aliq_ipi") @db.Decimal(7, 4)
+  valorIpi        Decimal?   @map("valor_ipi") @db.Decimal(18, 2)
+
+  // PIS / COFINS (regime antigo)
+  cstPis          String?    @map("cst_pis")
+  basePis         Decimal?   @map("base_pis") @db.Decimal(18, 2)
+  aliqPis         Decimal?   @map("aliq_pis") @db.Decimal(7, 4)
+  valorPis        Decimal?   @map("valor_pis") @db.Decimal(18, 2)
+  cstCofins       String?    @map("cst_cofins")
+  baseCofins      Decimal?   @map("base_cofins") @db.Decimal(18, 2)
+  aliqCofins      Decimal?   @map("aliq_cofins") @db.Decimal(7, 4)
+  valorCofins     Decimal?   @map("valor_cofins") @db.Decimal(18, 2)
+
+  // Tributação Reforma — NFE-20/21
+  cstIbsCbs       CstIbsCbs? @map("cst_ibs_cbs")
+  cClassTrib      String?    @map("c_class_trib")
+  baseIbsCbs      Decimal?   @map("base_ibs_cbs") @db.Decimal(18, 2)
+  aliqIbs         Decimal?   @map("aliq_ibs") @db.Decimal(7, 4)
+  valorIbs        Decimal?   @map("valor_ibs") @db.Decimal(18, 2)
+  aliqCbs         Decimal?   @map("aliq_cbs") @db.Decimal(7, 4)
+  valorCbs        Decimal?   @map("valor_cbs") @db.Decimal(18, 2)
+  cstIs           String?    @map("cst_is")
+  aliqIs          Decimal?   @map("aliq_is") @db.Decimal(7, 4)
+  valorIs         Decimal?   @map("valor_is") @db.Decimal(18, 2)
+
+  /// Indicador de operação especial (ZFM/ALC, monofásica, etc)
+  indOperacaoEspecial String? @map("ind_operacao_especial")
+  infAdProd       String?    @map("inf_ad_prod") @db.Text
+
+  nfe             NFe        @relation(fields: [nfeId], references: [id], onDelete: Cascade)
+  product         Product?   @relation(fields: [productId], references: [id])
+
+  @@unique([nfeId, numeroItem])
+  @@index([nfeId])
+  @@map("nfe_items")
+}
+
+/// Referência a outro DF-e (devolução, ajuste, complementar)
+/// NFE-26
+model NFeReferencia {
+  id            String  @id @default(cuid())
+  nfeId         String  @map("nfe_id")
+  chaveAcesso   String  @map("chave_acesso") @db.VarChar(44)
+  tipo          String  // "NFe", "NF", "NFP", "CT-e", "ECF"
+  observacao    String?
+
+  nfe           NFe     @relation(fields: [nfeId], references: [id], onDelete: Cascade)
+
+  @@index([nfeId])
+  @@map("nfe_referencias")
+}
+
+/// Eventos da NF-e — cancelamento, CC-e, ECONF, manifestação, etc
+/// SEF-09 / NFE-30
+model NFeEvento {
+  id              String        @id @default(cuid())
+  nfeId           String        @map("nfe_id")
+  tipoEvento      TipoEventoNFe @map("tipo_evento")
+  sequencial      Int           @default(1) // nSeqEvento
+  dhEvento        DateTime      @map("dh_evento")
+  justificativa   String?
+  /// Payload específico do evento (varia por tipoEvento)
+  detalhe         Json?
+
+  // Retorno SEFAZ
+  protocolo       String?
+  cStat           String?       @map("c_stat")
+  xMotivo         String?       @map("x_motivo")
+  xmlEvento       String?       @map("xml_evento") @db.Text
+  xmlRetorno      String?       @map("xml_retorno") @db.Text
+
+  status          DocumentStatus @default(PENDING)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  createdBy       String?       @map("created_by")
+
+  nfe             NFe           @relation(fields: [nfeId], references: [id])
+
+  @@unique([nfeId, tipoEvento, sequencial])
+  @@index([nfeId])
+  @@map("nfe_eventos")
+}
+
+/// Pagamento informado na NF-e (tag pag) — base para split payment futuro
+/// NFE-27
+model NFePagamento {
+  id            String         @id @default(cuid())
+  nfeId         String         @map("nfe_id")
+  meio          MeioPagamento
+  valor         Decimal        @db.Decimal(18, 2)
+  bandeira      String?        // tBand
+  cnpjCredenciadora String?    @map("cnpj_credenciadora")
+  numeroAutorizacao String?    @map("numero_autorizacao")
+
+  nfe           NFe            @relation(fields: [nfeId], references: [id], onDelete: Cascade)
+
+  @@index([nfeId])
+  @@map("nfe_pagamentos")
+}
+
+/// Registro de cada transmissão à SEFAZ (auditoria de integração SEF-01)
+model SefazTransmission {
+  id              String        @id @default(cuid())
+  companyId       String        @map("company_id")
+  nfeId           String?       @map("nfe_id")
+  uf              String        @db.Char(2)
+  ambiente        AmbienteSefaz
+  servico         String        // "NfeAutorizacao", "NFeRetAutorizacao", etc.
+  requestXml      String?       @map("request_xml") @db.Text
+  responseXml     String?       @map("response_xml") @db.Text
+  httpStatus      Int?          @map("http_status")
+  cStat           String?       @map("c_stat")
+  durationMs      Int?          @map("duration_ms")
+  errorMessage    String?       @map("error_message")
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  company         Company       @relation(fields: [companyId], references: [id])
+  nfe             NFe?          @relation(fields: [nfeId], references: [id])
+
+  @@index([companyId, createdAt])
+  @@index([nfeId])
+  @@map("sefaz_transmissions")
+}
+
+// =============================================================================
+//  NFS-e — Seção 6.3 (Focus NF-e — FNF-01..FNF-08)
+// =============================================================================
+
+model NFSe {
+  id                  String         @id @default(cuid())
+  companyId           String         @map("company_id")
+  customerId          String?        @map("customer_id")
+
+  /// Caminho usado (NACIONAL ou municipal) — define o adaptador Focus
+  caminhoEmissao      CaminhoEmissao @default(FOCUS_NFE) @map("caminho_emissao")
+  padraoNacional      Boolean        @default(true) @map("padrao_nacional")
+  codigoMunicipioIbge String         @map("codigo_municipio_ibge")
+  municipio           String
+  uf                  String         @db.Char(2)
+
+  numero              BigInt?        // nNFSe atribuído pela prefeitura/ambiente nacional
+  serie               String?
+  /// Código de verificação (alguns municípios)
+  codigoVerificacao   String?        @map("codigo_verificacao")
+  /// Chave de acesso da NFS-e Nacional (quando padrão nacional)
+  chaveAcesso         String?        @unique @map("chave_acesso")
+  dhEmissao           DateTime       @map("dh_emissao")
+  dhCompetencia       DateTime?      @map("dh_competencia")
+  ambiente            AmbienteSefaz
+
+  status              DocumentStatus @default(DRAFT)
+  idempotencyKey      String         @unique @map("idempotency_key")
+
+  // Retorno (Focus + prefeitura)
+  protocolo           String?
+  numeroDps           String?        @map("numero_dps")
+  motivoStatus        String?        @map("motivo_status")
+  dhAutorizacao       DateTime?      @map("dh_autorizacao")
+  dhCancelamento      DateTime?      @map("dh_cancelamento")
+  motivoCancelamento  String?        @map("motivo_cancelamento")
+
+  // Tomador
+  tomadorTipoPessoa   TipoPessoa     @map("tomador_tipo_pessoa")
+  tomadorCnpjCpf      String         @map("tomador_cnpj_cpf")
+  tomadorNome         String         @map("tomador_nome")
+  tomadorIm           String?        @map("tomador_im")
+  tomadorEmail        String?        @map("tomador_email")
+  tomadorEnderecoJson Json?          @map("tomador_endereco_json")
+
+  // Totais
+  valorServicos       Decimal        @default(0) @map("valor_servicos") @db.Decimal(18, 2)
+  valorDeducoes       Decimal        @default(0) @map("valor_deducoes") @db.Decimal(18, 2)
+  baseCalculo         Decimal        @default(0) @map("base_calculo") @db.Decimal(18, 2)
+  aliqIss             Decimal?       @map("aliq_iss") @db.Decimal(7, 4)
+  valorIss            Decimal        @default(0) @map("valor_iss") @db.Decimal(18, 2)
+  issRetido           Boolean        @default(false) @map("iss_retido")
+
+  // Retenções federais (regime antigo, NFS-001/12 — NFS-12)
+  valorPis            Decimal        @default(0) @map("valor_pis") @db.Decimal(18, 2)
+  valorCofins         Decimal        @default(0) @map("valor_cofins") @db.Decimal(18, 2)
+  valorCsll           Decimal        @default(0) @map("valor_csll") @db.Decimal(18, 2)
+  valorIr             Decimal        @default(0) @map("valor_ir") @db.Decimal(18, 2)
+  valorInss           Decimal        @default(0) @map("valor_inss") @db.Decimal(18, 2)
+
+  // Reforma — IBS/CBS na NFS-e — NFS-10/11
+  cIndOp              IndicadorOperacaoNFSe? @map("c_ind_op")
+  indZfmAlc           Boolean        @default(false) @map("ind_zfm_alc")
+  cTribNac            String?        @map("c_trib_nac")
+  baseIbsCbs          Decimal        @default(0) @map("base_ibs_cbs") @db.Decimal(18, 2)
+  aliqIbs             Decimal?       @map("aliq_ibs") @db.Decimal(7, 4)
+  valorIbs            Decimal        @default(0) @map("valor_ibs") @db.Decimal(18, 2)
+  aliqCbs             Decimal?       @map("aliq_cbs") @db.Decimal(7, 4)
+  valorCbs            Decimal        @default(0) @map("valor_cbs") @db.Decimal(18, 2)
+
+  // Discriminação livre
+  discriminacao       String         @db.Text
+
+  // Artefatos
+  jsonRequisicao      Json?          @map("json_requisicao")
+  xmlAutorizado       String?        @map("xml_autorizado") @db.Text
+  danfseUrl           String?        @map("danfse_url")
+
+  createdAt           DateTime       @default(now()) @map("created_at")
+  updatedAt           DateTime       @updatedAt @map("updated_at")
+  createdBy           String?        @map("created_by")
+  updatedBy           String?        @map("updated_by")
+
+  company             Company        @relation(fields: [companyId], references: [id])
+  customer            Customer?      @relation(fields: [customerId], references: [id])
+  items               NFSeItem[]
+  eventos             NFSeEvento[]
+  focusRequests       FocusRequest[]
+  receivables         AccountReceivable[]
+  salesOrder          SalesOrder?    @relation("salesOrderNfse")
+
+  @@index([companyId, dhEmissao])
+  @@index([companyId, status])
+  @@index([customerId])
+  @@map("nfses")
+}
+
+model NFSeItem {
+  id              String   @id @default(cuid())
+  nfseId          String   @map("nfse_id")
+  serviceId       String?  @map("service_id")
+  numeroItem      Int      @map("numero_item")
+  descricao       String
+  itemListaServico String  @map("item_lista_servico")
+  cTribNac        String?  @map("c_trib_nac")
+  cTribMun        String?  @map("c_trib_mun")
+  quantidade      Decimal  @db.Decimal(15, 4)
+  valorUnitario   Decimal  @map("valor_unitario") @db.Decimal(18, 6)
+  valorTotal      Decimal  @map("valor_total") @db.Decimal(18, 2)
+
+  nfse            NFSe     @relation(fields: [nfseId], references: [id], onDelete: Cascade)
+  service         Service? @relation(fields: [serviceId], references: [id])
+
+  @@unique([nfseId, numeroItem])
+  @@map("nfse_items")
+}
+
+model NFSeEvento {
+  id            String         @id @default(cuid())
+  nfseId        String         @map("nfse_id")
+  tipo          String         // "CANCELAMENTO", "SUBSTITUICAO"
+  motivo        String?
+  detalhe       Json?
+  status        DocumentStatus @default(PENDING)
+  createdAt     DateTime       @default(now()) @map("created_at")
+  createdBy     String?        @map("created_by")
+
+  nfse          NFSe           @relation(fields: [nfseId], references: [id])
+
+  @@index([nfseId])
+  @@map("nfse_eventos")
+}
+
+/// Auditoria de requisições à Focus NF-e (FNF-01)
+model FocusRequest {
+  id           String         @id @default(cuid())
+  companyId    String         @map("company_id")
+  nfseId       String?        @map("nfse_id")
+  endpoint     String
+  method       String         @db.VarChar(8)
+  requestBody  Json?          @map("request_body")
+  responseBody Json?          @map("response_body")
+  httpStatus   Int?           @map("http_status")
+  durationMs   Int?           @map("duration_ms")
+  errorMessage String?        @map("error_message")
+  createdAt    DateTime       @default(now()) @map("created_at")
+
+  company      Company        @relation(fields: [companyId], references: [id])
+  nfse         NFSe?          @relation(fields: [nfseId], references: [id])
+
+  @@index([companyId, createdAt])
+  @@index([nfseId])
+  @@map("focus_requests")
+}
+
+// =============================================================================
+//  IMPORTAÇÃO / ENTRADAS — Seção 6.4 (NSU SEFAZ + Focus "versao")
+// =============================================================================
+
+/// Cursor de recepção: para NF-e/CT-e (SEFAZ via NSU) e NFS-e Nacional (Focus via "versao")
+/// ENT-02 (NSU), ENT-04 (versao)
+model NsuCursor {
+  id           String   @id @default(cuid())
+  companyId    String   @map("company_id")
+  /// "sefaz_nfe_cte" | "focus_nfsen"
+  origem       String
+  cursorValue  String   @map("cursor_value") // string para suportar BigInt/text
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  company      Company  @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, origem])
+  @@map("nsu_cursors")
+}
+
+/// Documento recebido contra o CNPJ (NF-e, CT-e, NFS-e Nacional)
+/// ENT-01..ENT-07
+model ReceivedDocument {
+  id                  String   @id @default(cuid())
+  companyId           String   @map("company_id")
+  supplierId          String?  @map("supplier_id")
+  tipo                TipoDFe
+  /// Chave de acesso (NF-e/CT-e) ou identificador equivalente
+  chaveAcesso         String?  @map("chave_acesso") @db.VarChar(44)
+  numero              String?
+  serie               String?
+
+  // Emitente
+  emitenteCnpj        String   @map("emitente_cnpj")
+  emitenteNome        String   @map("emitente_nome")
+  emitenteUf          String?  @map("emitente_uf") @db.Char(2)
+
+  dhEmissao           DateTime @map("dh_emissao")
+  valorTotal          Decimal  @map("valor_total") @db.Decimal(18, 2)
+
+  /// NSU SEFAZ (NF-e/CT-e) ou versão Focus (NFS-e Nacional)
+  nsu                 String?
+  versaoFocus         String?  @map("versao_focus")
+
+  /// Estado interno da escrituração
+  status              String   @default("PENDENTE") // PENDENTE | CONFERIDO | ESCRITURADO | DEVOLVIDO
+  resumoXml           String?  @map("resumo_xml") @db.Text
+  xmlCompleto         String?  @map("xml_completo") @db.Text
+  origemCaptura       String   @map("origem_captura") // "sefaz_distribuicao", "focus_nfsen", "upload_xml", "upload_pdf"
+  capturedAt          DateTime @default(now()) @map("captured_at")
+  conferidoEm         DateTime? @map("conferido_em")
+  conferidoBy         String?  @map("conferido_by")
+  escrituradoEm       DateTime? @map("escriturado_em")
+  observacoes         String?
+
+  company             Company  @relation(fields: [companyId], references: [id])
+  supplier            Supplier? @relation(fields: [supplierId], references: [id])
+  manifestations      DfeManifestation[]
+  versions            ReceivedDocumentVersion[]
+  payables            AccountPayable[]
+
+  @@unique([companyId, chaveAcesso])
+  @@index([companyId, status])
+  @@index([companyId, dhEmissao])
+  @@index([emitenteCnpj])
+  @@map("received_documents")
+}
+
+/// Histórico de versões do documento recebido (carta de correção, cancelamento que chega depois)
+model ReceivedDocumentVersion {
+  id                  String   @id @default(cuid())
+  receivedDocumentId  String   @map("received_document_id")
+  versao              Int
+  tipoMudanca         String   @map("tipo_mudanca") // "CCE", "CANCELAMENTO", "EVENTO"
+  payload             Json
+  receivedAt          DateTime @default(now()) @map("received_at")
+
+  receivedDocument    ReceivedDocument @relation(fields: [receivedDocumentId], references: [id])
+
+  @@index([receivedDocumentId])
+  @@map("received_document_versions")
+}
+
+/// Manifestação do destinatário — ENT-03
+model DfeManifestation {
+  id                  String           @id @default(cuid())
+  receivedDocumentId  String           @map("received_document_id")
+  tipo                TipoManifestacao
+  justificativa       String?
+  /// Estado da submissão à SEFAZ
+  status              DocumentStatus   @default(PENDING)
+  protocolo           String?
+  cStat               String?          @map("c_stat")
+  dhEvento            DateTime         @map("dh_evento")
+  enviadoEm           DateTime?        @map("enviado_em")
+  retornoXml          String?          @map("retorno_xml") @db.Text
+  createdAt           DateTime         @default(now()) @map("created_at")
+  createdBy           String           @map("created_by")
+
+  receivedDocument    ReceivedDocument @relation(fields: [receivedDocumentId], references: [id])
+
+  @@index([receivedDocumentId])
+  @@map("dfe_manifestations")
+}
+
+// =============================================================================
+//  COMPRAS — Seção 6.5
+// =============================================================================
+
+model PurchaseOrder {
+  id              String        @id @default(cuid())
+  companyId       String        @map("company_id")
+  supplierId      String        @map("supplier_id")
+  numero          String
+  status          StatusPedido  @default(RASCUNHO)
+  dataEmissao     DateTime      @map("data_emissao")
+  previsaoEntrega DateTime?     @map("previsao_entrega")
+  valorTotal      Decimal       @default(0) @map("valor_total") @db.Decimal(18, 2)
+  observacoes     String?
+
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  createdBy       String?       @map("created_by")
+  approvedBy      String?       @map("approved_by")
+  approvedAt      DateTime?     @map("approved_at")
+
+  company         Company       @relation(fields: [companyId], references: [id])
+  supplier        Supplier      @relation(fields: [supplierId], references: [id])
+  items           PurchaseOrderItem[]
+
+  @@unique([companyId, numero])
+  @@index([companyId, status])
+  @@index([supplierId])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(cuid())
+  purchaseOrderId String        @map("purchase_order_id")
+  productId       String        @map("product_id")
+  quantidade      Decimal       @db.Decimal(15, 4)
+  valorUnitario   Decimal       @map("valor_unitario") @db.Decimal(18, 6)
+  valorTotal      Decimal       @map("valor_total") @db.Decimal(18, 2)
+  quantidadeRecebida Decimal    @default(0) @map("quantidade_recebida") @db.Decimal(15, 4)
+
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product         Product       @relation(fields: [productId], references: [id])
+
+  @@index([purchaseOrderId])
+  @@map("purchase_order_items")
+}
+
+// =============================================================================
+//  VENDAS — Seção 6.6
+// =============================================================================
+
+model PriceList {
+  id          String   @id @default(cuid())
+  companyId   String   @map("company_id")
+  nome        String
+  validFrom   DateTime @map("valid_from")
+  validTo     DateTime? @map("valid_to")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  items       PriceListItem[]
+
+  @@unique([companyId, nome])
+  @@map("price_lists")
+}
+
+model PriceListItem {
+  id            String    @id @default(cuid())
+  priceListId   String    @map("price_list_id")
+  productId     String    @map("product_id")
+  precoVenda    Decimal   @map("preco_venda") @db.Decimal(18, 6)
+  descontoMaximo Decimal? @map("desconto_maximo") @db.Decimal(7, 4)
+
+  priceList     PriceList @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  product       Product   @relation(fields: [productId], references: [id])
+
+  @@unique([priceListId, productId])
+  @@map("price_list_items")
+}
+
+model SalesOrder {
+  id              String        @id @default(cuid())
+  companyId       String        @map("company_id")
+  customerId      String        @map("customer_id")
+  numero          String
+  status          StatusPedido  @default(RASCUNHO)
+  dataEmissao     DateTime      @map("data_emissao")
+  valorTotal      Decimal       @default(0) @map("valor_total") @db.Decimal(18, 2)
+  observacoes     String?
+
+  // Vínculo opcional com a nota emitida
+  nfeId           String?       @unique @map("nfe_id")
+  nfseId          String?       @unique @map("nfse_id")
+
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  createdBy       String?       @map("created_by")
+
+  company         Company       @relation(fields: [companyId], references: [id])
+  customer        Customer      @relation(fields: [customerId], references: [id])
+  items           SalesOrderItem[]
+  nfe             NFe?          @relation("salesOrderNfe", fields: [nfeId], references: [id])
+  nfse            NFSe?         @relation("salesOrderNfse", fields: [nfseId], references: [id])
+
+  @@unique([companyId, numero])
+  @@index([companyId, status])
+  @@index([customerId])
+  @@map("sales_orders")
+}
+
+model SalesOrderItem {
+  id              String     @id @default(cuid())
+  salesOrderId    String     @map("sales_order_id")
+  productId       String?    @map("product_id")
+  serviceId       String?    @map("service_id")
+  descricao       String
+  quantidade      Decimal    @db.Decimal(15, 4)
+  valorUnitario   Decimal    @map("valor_unitario") @db.Decimal(18, 6)
+  valorDesconto   Decimal    @default(0) @map("valor_desconto") @db.Decimal(18, 2)
+  valorTotal      Decimal    @map("valor_total") @db.Decimal(18, 2)
+
+  salesOrder      SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  product         Product?   @relation(fields: [productId], references: [id])
+
+  @@index([salesOrderId])
+  @@map("sales_order_items")
+}
+
+// =============================================================================
+//  FINANCEIRO — Seção 6.7
+// =============================================================================
+
+model BankAccount {
+  id              String   @id @default(cuid())
+  companyId       String   @map("company_id")
+  nome            String
+  banco           String
+  agencia         String
+  conta           String
+  digito          String?
+  tipo            String   @default("CORRENTE") // CORRENTE | POUPANCA | INVESTIMENTO | CAIXA
+  saldoInicial    Decimal  @default(0) @map("saldo_inicial") @db.Decimal(18, 2)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  company         Company  @relation(fields: [companyId], references: [id])
+  transactions    BankTransaction[]
+
+  @@map("bank_accounts")
+}
+
+model BankTransaction {
+  id              String      @id @default(cuid())
+  bankAccountId   String      @map("bank_account_id")
+  data            DateTime
+  descricao       String
+  valor           Decimal     @db.Decimal(18, 2) // positivo = entrada; negativo = saída
+  tipo            String      // "credito" | "debito" | "transferencia"
+  /// ID do extrato OFX/CNAB para conciliação
+  externalId      String?     @map("external_id")
+  conciliada      Boolean     @default(false)
+  receivableId    String?     @map("receivable_id")
+  payableId       String?     @map("payable_id")
+  createdAt       DateTime    @default(now()) @map("created_at")
+
+  bankAccount     BankAccount @relation(fields: [bankAccountId], references: [id])
+  receivable      AccountReceivable? @relation(fields: [receivableId], references: [id])
+  payable         AccountPayable? @relation(fields: [payableId], references: [id])
+
+  @@index([bankAccountId, data])
+  @@index([externalId])
+  @@map("bank_transactions")
+}
+
+/// Contas a receber (título) — FIN-01
+model AccountReceivable {
+  id              String           @id @default(cuid())
+  companyId       String           @map("company_id")
+  customerId      String           @map("customer_id")
+  /// Origem: NF-e ou NFS-e
+  nfeId           String?          @map("nfe_id")
+  nfseId          String?          @map("nfse_id")
+  descricao       String
+  valorOriginal   Decimal          @map("valor_original") @db.Decimal(18, 2)
+  valorAberto     Decimal          @map("valor_aberto") @db.Decimal(18, 2)
+  dataEmissao     DateTime         @map("data_emissao")
+  status          StatusTitulo     @default(ABERTO)
+  observacoes     String?
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  createdBy       String?          @map("created_by")
+
+  company         Company          @relation(fields: [companyId], references: [id])
+  customer        Customer         @relation(fields: [customerId], references: [id])
+  nfe             NFe?             @relation(fields: [nfeId], references: [id])
+  nfse            NFSe?            @relation(fields: [nfseId], references: [id])
+  installments    ReceivableInstallment[]
+  transactions    BankTransaction[]
+
+  @@index([companyId, status])
+  @@index([customerId])
+  @@map("accounts_receivable")
+}
+
+model ReceivableInstallment {
+  id              String   @id @default(cuid())
+  receivableId    String   @map("receivable_id")
+  numero          Int
+  vencimento      DateTime
+  valor           Decimal  @db.Decimal(18, 2)
+  valorPago       Decimal  @default(0) @map("valor_pago") @db.Decimal(18, 2)
+  juros           Decimal  @default(0) @db.Decimal(18, 2)
+  multa           Decimal  @default(0) @db.Decimal(18, 2)
+  desconto        Decimal  @default(0) @db.Decimal(18, 2)
+  dataPagamento   DateTime? @map("data_pagamento")
+  status          StatusTitulo @default(ABERTO)
+  meioPagamento   MeioPagamento? @map("meio_pagamento")
+  observacoes     String?
+
+  receivable      AccountReceivable @relation(fields: [receivableId], references: [id], onDelete: Cascade)
+
+  @@unique([receivableId, numero])
+  @@index([vencimento, status])
+  @@map("receivable_installments")
+}
+
+/// Contas a pagar (título) — FIN-02
+model AccountPayable {
+  id                  String           @id @default(cuid())
+  companyId           String           @map("company_id")
+  supplierId          String           @map("supplier_id")
+  /// Origem: documento recebido (nota de entrada / serviço tomado)
+  receivedDocumentId  String?          @map("received_document_id")
+  descricao           String
+  valorOriginal       Decimal          @map("valor_original") @db.Decimal(18, 2)
+  valorAberto         Decimal          @map("valor_aberto") @db.Decimal(18, 2)
+  dataEmissao         DateTime         @map("data_emissao")
+  status              StatusTitulo     @default(ABERTO)
+  observacoes         String?
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+  createdBy           String?          @map("created_by")
+
+  company             Company          @relation(fields: [companyId], references: [id])
+  supplier            Supplier         @relation(fields: [supplierId], references: [id])
+  receivedDocument    ReceivedDocument? @relation(fields: [receivedDocumentId], references: [id])
+  installments        PayableInstallment[]
+  transactions        BankTransaction[]
+
+  @@index([companyId, status])
+  @@index([supplierId])
+  @@map("accounts_payable")
+}
+
+model PayableInstallment {
+  id              String         @id @default(cuid())
+  payableId       String         @map("payable_id")
+  numero          Int
+  vencimento      DateTime
+  valor           Decimal        @db.Decimal(18, 2)
+  valorPago       Decimal        @default(0) @map("valor_pago") @db.Decimal(18, 2)
+  juros           Decimal        @default(0) @db.Decimal(18, 2)
+  multa           Decimal        @default(0) @db.Decimal(18, 2)
+  desconto        Decimal        @default(0) @db.Decimal(18, 2)
+  dataPagamento   DateTime?      @map("data_pagamento")
+  status          StatusTitulo   @default(ABERTO)
+  meioPagamento   MeioPagamento? @map("meio_pagamento")
+  observacoes     String?
+
+  payable         AccountPayable @relation(fields: [payableId], references: [id], onDelete: Cascade)
+
+  @@unique([payableId, numero])
+  @@index([vencimento, status])
+  @@map("payable_installments")
+}
+
+/// Evento de Conciliação Financeira (ECONF) — FIN-12 / SEF-09
+/// Preparação para split payment (NT RT 2026.001)
+model EconfEvent {
+  id              String         @id @default(cuid())
+  nfeId           String         @map("nfe_id")
+  /// Valor financeiro da operação reconhecido
+  valorLiquidado  Decimal        @map("valor_liquidado") @db.Decimal(18, 2)
+  meioPagamento   MeioPagamento  @map("meio_pagamento")
+  dataLiquidacao  DateTime       @map("data_liquidacao")
+  cnpjCredenciadora String?      @map("cnpj_credenciadora")
+  /// Dados específicos do evento (Authorization codes, NSU, etc)
+  detalhe         Json?
+  status          DocumentStatus @default(PENDING)
+  protocolo       String?
+  enviadoEm       DateTime?      @map("enviado_em")
+  canceladoEm     DateTime?      @map("cancelado_em")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  createdBy       String?        @map("created_by")
+
+  nfe             NFe            @relation(fields: [nfeId], references: [id])
+
+  @@index([nfeId])
+  @@map("econf_events")
+}

@@ -1,0 +1,16 @@
+node_modules
+dist
+coverage
+*.log
+.env
+.env.local
+.env.*.local
+.DS_Store
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea
+tmp
+*.pem
+*.pfx
+*.p12
