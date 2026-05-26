@@ -48,12 +48,18 @@ export class SupplierRepository implements ISupplierRepository {
 
     if (active !== undefined) qb.andWhere('s.active = :active', { active });
     if (search) {
+      // Idem CustomerRepository: usa f_unaccent + índice trgm e protege contra
+      // o caso de search sem dígitos virar '%%' no CNPJ/CPF.
+      const rawDigits = search.replace(/\D/g, '');
       qb.andWhere(
         new Brackets((b) => {
-          b.where('s.nome_razao ILIKE :term', { term: `%${search}%` }).orWhere(
-            's.cnpj_cpf ILIKE :rawTerm',
-            { rawTerm: `%${search.replace(/\D/g, '')}%` },
+          b.where(
+            `f_unaccent(lower(s.nome_razao)) LIKE f_unaccent(lower(:term))`,
+            { term: `%${search}%` },
           );
+          if (rawDigits.length > 0) {
+            b.orWhere('s.cnpj_cpf LIKE :rawTerm', { rawTerm: `%${rawDigits}%` });
+          }
         }),
       );
     }

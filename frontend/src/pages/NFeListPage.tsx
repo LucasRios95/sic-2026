@@ -1,13 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { listNFes } from '@/features/nfe/nfe-api';
 import { Badge } from '@/shared/components/ui/Badge';
 import { Button } from '@/shared/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/Card';
 import { Input } from '@/shared/components/ui/Input';
+import { Pagination } from '@/shared/components/ui/Pagination';
 import { Select } from '@/shared/components/ui/Select';
+import { usePagination } from '@/shared/hooks/usePagination';
 import { STATUS_LABEL, STATUS_STYLES } from '@/shared/types/fiscal';
 import type { DocumentStatus } from '@/shared/types/fiscal';
 
@@ -24,14 +26,23 @@ const STATUSES: DocumentStatus[] = [
 export function NFeListPage(): React.ReactElement {
   const [statusFilter, setStatusFilter] = useState<DocumentStatus | ''>('');
   const [search, setSearch] = useState('');
+  const pagination = usePagination({ initialPageSize: 50 });
+
+  useEffect(() => {
+    pagination.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, search]);
+
   const { data, isLoading } = useQuery({
-    queryKey: ['nfe', statusFilter, search],
+    queryKey: ['nfe', statusFilter, search, pagination.page, pagination.pageSize],
     queryFn: () =>
       listNFes({
         status: statusFilter || undefined,
         search: search || undefined,
-        limit: 100,
+        limit: pagination.pageSize,
+        offset: pagination.offset,
       }),
+    placeholderData: (prev) => prev,
   });
 
   return (
@@ -43,9 +54,14 @@ export function NFeListPage(): React.ReactElement {
             Notas Fiscais Eletrônicas modelo 55 da empresa selecionada.
           </p>
         </div>
-        <Link to="/fiscal/nfe/new">
-          <Button>Emitir nova NF-e</Button>
-        </Link>
+        <div className="flex gap-2">
+          <Link to="/fiscal/nfe/inutilizar">
+            <Button variant="outline">Inutilizar faixa</Button>
+          </Link>
+          <Link to="/fiscal/nfe/new" search={{ reissueFrom: undefined }}>
+            <Button>Emitir nova NF-e</Button>
+          </Link>
+        </div>
       </header>
 
       <div className="flex gap-3">
@@ -114,6 +130,15 @@ export function NFeListPage(): React.ReactElement {
               </div>
             </Link>
           ))}
+          <Pagination
+            total={data?.total ?? 0}
+            page={pagination.page}
+            pageSize={pagination.pageSize}
+            onPageChange={pagination.setPage}
+            onPageSizeChange={pagination.setPageSize}
+            isLoading={isLoading}
+            className="pt-2"
+          />
         </CardContent>
       </Card>
     </div>

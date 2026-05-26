@@ -71,7 +71,7 @@ const ORIGEM_LABEL: Record<string, string> = {
 };
 
 export function ReceivedDocumentDetailsPage(): React.ReactElement {
-  const { id } = useParams({ from: '/fiscal/recebidos/$id' });
+  const { id } = useParams({ from: '/app-layout/fiscal/recebidos/$id' });
   const navigate = useNavigate();
   const [manifestOpen, setManifestOpen] = useState(false);
 

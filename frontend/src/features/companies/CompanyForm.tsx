@@ -74,6 +74,42 @@ export const COMPANY_FORM_INITIAL: CompanyFormState = {
   usaIcmsDesonerado: false,
 };
 
+/**
+ * Hidrata o form a partir de uma Company recebida do backend. Substitui null
+ * por string vazia pra evitar warnings de React em <input value>.
+ */
+import type { Company } from './companies-api';
+export function companyToFormState(c: Company): CompanyFormState {
+  return {
+    cnpj: c.cnpj,
+    razaoSocial: c.razaoSocial,
+    nomeFantasia: c.nomeFantasia ?? '',
+    ie: c.ie ?? '',
+    im: c.im ?? '',
+    crt: c.crt,
+    cnae: c.cnae ?? '',
+    logradouro: c.logradouro,
+    numero: c.numero,
+    complemento: c.complemento ?? '',
+    bairro: c.bairro,
+    codigoMunicipioIbge: c.codigoMunicipioIbge,
+    municipio: c.municipio,
+    uf: c.uf,
+    cep: c.cep,
+    telefone: c.telefone ?? '',
+    email: c.email ?? '',
+    ambienteSefaz: c.ambienteSefaz,
+    emiteNfe: c.emiteNfe,
+    emiteNfse: c.emiteNfse,
+    usaIcms: c.usaIcms,
+    usaIcmsSt: c.usaIcmsSt,
+    usaIpi: c.usaIpi,
+    usaDifal: c.usaDifal,
+    usaFcp: c.usaFcp,
+    usaIcmsDesonerado: c.usaIcmsDesonerado,
+  };
+}
+
 export function companyFormToPayload(form: CompanyFormState): CreateCompanyPayload {
   return {
     cnpj: form.cnpj.replace(/\D/g, ''),

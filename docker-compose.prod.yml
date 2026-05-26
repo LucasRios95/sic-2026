@@ -1,0 +1,164 @@
+# =============================================================================
+# Orquestração de PRODUÇÃO — instalação on-premise no cliente.
+#
+# Diferenças do compose de dev:
+#   - Imagens construídas pelos Dockerfile.prod (multi-stage; sem source dentro)
+#   - Sem bind mount do código — código vive nas imagens
+#   - Frontend é Nginx servindo o bundle estático na porta 8080 do host
+#   - Backend não expõe porta — só Nginx alcança (proxy interno via rede Docker)
+#   - Volumes nomeados para Postgres, Redis, vault e docs (persistência)
+#   - Restart automático em caso de crash ou reboot da máquina
+#
+# Acessos no cliente (após `docker compose -f docker-compose.prod.yml up -d`):
+#   http://localhost:8080         — frontend
+#   localhost:5432 (DB_PORT)      — Postgres (interno; só pra dump/restore)
+#
+# Credencial admin inicial: admin@sic.local / Admin@123  — TROQUE NO PRIMEIRO LOGIN.
+#
+# Pré-requisitos:
+#   - Docker Desktop instalado (Windows/Mac) ou Docker Engine (Linux)
+#   - Arquivo .env preenchido na raiz com JWT_SECRET, VAULT_MASTER_KEY,
+#     DB_PASS e (opcional) NFE_TLS_CA_BUNDLE
+#
+# Comandos úteis:
+#   docker compose -f docker-compose.prod.yml up -d        # subir
+#   docker compose -f docker-compose.prod.yml logs -f      # acompanhar
+#   docker compose -f docker-compose.prod.yml down         # parar (preserva dados)
+#   docker compose -f docker-compose.prod.yml down -v      # APAGA tudo
+# =============================================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: ${DB_NAME:-sic_2026}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - sic_2026_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-sic_2026}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - sic_2026_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # One-shot na primeira subida: aplica migrations pendentes + seed idempotente
+  # (CFOPs, NCMs, perms, papéis, admin). Se o banco for restaurado de um dump,
+  # as migrations já estão aplicadas e o seed só faz upsert.
+  migrate:
+    image: sic-2026-backend:prod
+    # Roda via tsx contra TS direto (sem build). Migrations e seed idempotentes.
+    command:
+      - sh
+      - -c
+      - >-
+        npx tsx ./node_modules/typeorm/cli.js -d src/shared/infra/typeorm/data-source.ts migration:run
+        && npx tsx src/shared/infra/typeorm/seeds/run-seeds.ts
+    environment: &backend-env
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PORT: 3333
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASS: ${DB_PASS}
+      DB_NAME: ${DB_NAME:-sic_2026}
+      DB_SCHEMA: public
+      DB_SYNCHRONIZE: "false"
+      DB_LOGGING: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      QUEUE_PREFIX: sic2026
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ACCESS_TOKEN_EXPIRES_IN: 15m
+      JWT_REFRESH_TOKEN_EXPIRES_IN: 7d
+      BCRYPT_COST: "12"
+      LOGIN_MAX_ATTEMPTS: "5"
+      LOGIN_LOCK_DURATION_MINUTES: "15"
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8080}
+      VAULT_DRIVER: filesystem
+      VAULT_PATH: /app/tmp/vault
+      VAULT_MASTER_KEY: ${VAULT_MASTER_KEY}
+      STORAGE_DRIVER: filesystem
+      STORAGE_PATH: /app/tmp/docs
+      MAIL_HOST: ${MAIL_HOST:-}
+      NFE_TLS_CA_BUNDLE: ${NFE_TLS_CA_BUNDLE:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - sic_2026_backend_tmp:/app/tmp
+      - ./certs:/app/certs:ro
+    restart: "no"
+
+  backend:
+    image: sic-2026-backend:prod
+    restart: unless-stopped
+    environment: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - sic_2026_backend_tmp:/app/tmp
+      - ./certs:/app/certs:ro
+    healthcheck:
+      # 127.0.0.1 explicito porque o wget busybox tenta IPv6 primeiro.
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3333/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  worker:
+    image: sic-2026-backend:prod
+    restart: unless-stopped
+    # Worker compartilha imagem com backend, só muda o command.
+    command: ["npx", "tsx", "src/shared/infra/queues/worker.ts"]
+    environment: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - sic_2026_backend_tmp:/app/tmp
+      - ./certs:/app/certs:ro
+
+  frontend:
+    image: sic-2026-frontend:prod
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      - backend
+    healthcheck:
+      # 127.0.0.1 explicito (mesma razao do backend).
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  sic_2026_postgres_data:
+  sic_2026_redis_data:
+  sic_2026_backend_tmp:

@@ -47,6 +47,20 @@ export async function listNFes(filter: ListNFesFilter = {}): Promise<{
   return { items: payload.data, total: payload.meta.total };
 }
 
+/**
+ * Lê o próximo número da série SEM reservar. Usado pela UI de emissão pra
+ * pré-popular o campo "Número"; o faturista pode aceitar ou editar.
+ */
+export async function getProximoNumero(
+  serie = 1,
+  modelo = '55',
+): Promise<{ modelo: string; serie: number; proximoNumero: string }> {
+  return api<{ modelo: string; serie: number; proximoNumero: string }>(
+    `/nfe/proximo-numero?serie=${serie}&modelo=${modelo}`,
+    { companyId: companyOrThrow() },
+  );
+}
+
 export async function getNFe(id: string): Promise<NFeFull> {
   return api<NFeFull>(`/nfe/${id}`, { companyId: companyOrThrow() });
 }
@@ -110,6 +124,12 @@ export interface EmitirNFePayload {
   idempotencyKey: string;
   customerId: string;
   serie: number;
+  /**
+   * Número da NF-e (BigInt como string). Opcional — quando omitido, o backend
+   * aloca o próximo automaticamente. Quando informado, força esse valor e a
+   * sequência seguinte continua a partir dele.
+   */
+  numero?: string;
   naturezaOperacao: string;
   tipoOperacao?: TipoOperacao;
   finalidade?: FinalidadeNFe;
@@ -179,6 +199,37 @@ export async function sendNFeByEmail(
   payload: { to?: string } = {},
 ): Promise<{ messageId: string; to: string; danfeUrl: string }> {
   return api<{ messageId: string; to: string; danfeUrl: string }>(`/nfe/${id}/email`, {
+    method: 'POST',
+    body: payload,
+    companyId: companyOrThrow(),
+  });
+}
+
+export interface InutilizarFaixaPayload {
+  serie: number;
+  numeroInicial: number;
+  numeroFinal: number;
+  justificativa: string;
+  ano?: number;
+  certificateVaultRef: string;
+}
+
+export interface InutilizarFaixaResult {
+  inutId: string;
+  protocolo: string | null;
+  cStat: string | null;
+  xMotivo: string | null;
+  faixa: { inicial: number; final: number };
+}
+
+/**
+ * Inutiliza uma faixa de numeração NÃO USADA. Backend valida que a faixa não tem NF-e
+ * emitida (status != DRAFT) e transmite o evento à SEFAZ.
+ */
+export async function inutilizarFaixa(
+  payload: InutilizarFaixaPayload,
+): Promise<InutilizarFaixaResult> {
+  return api<InutilizarFaixaResult>(`/nfe/inutilizar`, {
     method: 'POST',
     body: payload,
     companyId: companyOrThrow(),

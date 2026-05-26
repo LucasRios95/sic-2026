@@ -15,6 +15,7 @@ import { CustomersPage } from '@/pages/CustomersPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { IcmsStMvaPage } from '@/pages/IcmsStMvaPage';
 import { InboxRecebidosPage } from '@/pages/InboxRecebidosPage';
+import { InutilizacaoPage } from '@/pages/InutilizacaoPage';
 import { InterstateAliquotsPage } from '@/pages/InterstateAliquotsPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { NFeDetailsPage } from '@/pages/NFeDetailsPage';
@@ -163,12 +164,23 @@ const nfeNewRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: '/fiscal/nfe/new',
   component: NFeNewPage,
+  // `reissueFrom=<id>` permite abrir o form pre-populado com os dados de uma NF-e
+  // existente (REJECTED/PENDING/DENIED). Validacao ad-hoc — o id eh apenas string opcional.
+  validateSearch: (search: Record<string, unknown>) => ({
+    reissueFrom: typeof search.reissueFrom === 'string' ? search.reissueFrom : undefined,
+  }),
 });
 
 const nfeDetailsRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: '/fiscal/nfe/$id',
   component: NFeDetailsPage,
+});
+
+const nfeInutilizarRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/fiscal/nfe/inutilizar',
+  component: InutilizacaoPage,
 });
 
 const inboxRecebidosRoute = createRoute({
@@ -195,6 +207,7 @@ const routeTree = rootRoute.addChildren([
     productsRoute,
     nfeListRoute,
     nfeNewRoute,
+    nfeInutilizarRoute,
     nfeDetailsRoute,
     inboxRecebidosRoute,
     receivedDocumentDetailsRoute,

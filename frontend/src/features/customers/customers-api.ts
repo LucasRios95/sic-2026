@@ -65,3 +65,30 @@ export async function createCustomer(payload: CreateCustomerPayload): Promise<Cu
     companyId: withCompany().companyId,
   });
 }
+
+export async function getCustomer(id: string): Promise<Customer> {
+  return api<Customer>(`/customers/${id}`, {
+    companyId: withCompany().companyId,
+  });
+}
+
+/** Atualização parcial — endpoint PUT aceita Partial<CreateCustomerPayload> menos tipo/documento. */
+export type UpdateCustomerPayload = Partial<Omit<CreateCustomerPayload, 'tipoPessoa' | 'cnpjCpf'>>;
+
+export async function updateCustomer(
+  id: string,
+  payload: UpdateCustomerPayload,
+): Promise<Customer> {
+  return api<Customer>(`/customers/${id}`, {
+    method: 'PUT',
+    body: payload,
+    companyId: withCompany().companyId,
+  });
+}
+
+export async function deleteCustomer(id: string): Promise<void> {
+  await api<void>(`/customers/${id}`, {
+    method: 'DELETE',
+    companyId: withCompany().companyId,
+  });
+}

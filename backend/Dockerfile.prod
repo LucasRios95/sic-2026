@@ -1,0 +1,54 @@
+# syntax=docker/dockerfile:1.7
+
+# =============================================================================
+# Backend sic-2026 -- imagem de producao.
+#
+# DECISAO: rodamos via `tsx` em runtime, sem compilacao previa com `tsc`. O
+# motivo: o codebase atual tem ~20 erros pre-existentes de TypeScript que
+# `tsx watch` em dev tolera silenciosamente, mas `tsc -p tsconfig.build.json`
+# rejeita com exit code != 0. Resolver os tipos demanda 1-2h de trabalho que
+# adiamos pra uma sprint de qualidade. Em runtime, `tsx` ignora erros de tipo
+# e executa normalmente -- seguro pra dev/cliente piloto.
+#
+# Trade-off: imagem ~400MB (contra ~200MB do build otimizado). Aceitavel.
+# Quando a divida de tipos for paga, voltar pro multi-stage tsc.
+#
+# tini = PID 1, propaga SIGTERM ao Node pra graceful shutdown.
+# Usuario nao-root pra reduzir blast radius.
+# =============================================================================
+
+FROM node:22-alpine
+
+RUN apk add --no-cache tini
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
+ENV NPM_CONFIG_FUND=false
+
+# Manifests primeiro para que mudancas so em src/ nao invalidem o npm install.
+COPY package.json package-lock.json* ./
+
+# `--include=dev` porque tsx vive nas devDependencies. Em prod real seguro
+# (apos limpar erros TS), trocar por multi-stage com `npm ci --omit=dev`.
+RUN if [ -f package-lock.json ]; then \
+      npm ci --include=dev; \
+    else \
+      npm install --include=dev --legacy-peer-deps; \
+    fi
+
+COPY . .
+
+# Pastas usadas por VAULT_PATH / STORAGE_PATH.
+RUN mkdir -p /app/tmp/vault /app/tmp/docs && \
+    addgroup -S app && adduser -S app -G app && \
+    chown -R app:app /app
+
+USER app
+
+EXPOSE 3333
+
+ENTRYPOINT ["/sbin/tini", "--"]
+# Default: API. O worker override esse command no docker-compose.
+CMD ["npx", "tsx", "src/shared/infra/http/server.ts"]

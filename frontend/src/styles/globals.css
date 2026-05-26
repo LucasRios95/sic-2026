@@ -137,4 +137,17 @@
     animation: fade-in 0.4s ease-out forwards;
     opacity: 0;
   }
+
+  /**
+   * Esconde a scrollbar visualmente mas mantém o scroll funcional (roda do mouse,
+   * trackpad, teclado). Útil em painéis longos como a sidebar onde a barra padrão
+   * polui o visual sem agregar utilidade — o usuário já sabe que dá pra rolar.
+   */
+  .scrollbar-hidden {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE/Edge legado */
+  }
+  .scrollbar-hidden::-webkit-scrollbar {
+    display: none; /* Chrome / Safari / Edge moderno */
+  }
 }

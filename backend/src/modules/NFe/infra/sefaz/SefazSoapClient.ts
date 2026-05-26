@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import https from 'node:https';
 
 import axios, { AxiosInstance } from 'axios';
@@ -7,10 +8,8 @@ import { inject, injectable } from 'tsyringe';
 import { AmbienteSefaz } from '@modules/Companies/infra/typeorm/entities/Company';
 import { IntegrationError } from '@shared/errors';
 import { logger } from '@shared/logger';
-import {
-  ICertificateVault,
-  RetrievedCertificate,
-} from '@shared/container/providers/CertificateVault/ICertificateVault';
+import { CertificateAccessor } from '@shared/container/providers/CertificateVault/CertificateAccessor';
+import { RetrievedCertificate } from '@shared/container/providers/CertificateVault/ICertificateVault';
 
 import { NFeSigner } from '../signing/NFeSigner';
 import {
@@ -70,15 +69,17 @@ export class SefazSoapClient {
   });
 
   constructor(
-    @inject('CertificateVault')
-    private readonly vault: ICertificateVault,
+    @inject(CertificateAccessor)
+    private readonly certAccessor: CertificateAccessor,
 
     @inject('SefazTransmissionRepository')
     private readonly transmissionRepo: ISefazTransmissionRepository,
   ) {}
 
   async call(params: SoapCallParams): Promise<SoapCallResult> {
-    const cert = await this.vault.retrieve(params.certificateVaultRef);
+    // params.certificateVaultRef pode ser tanto um vault_ref interno (`fs:...`)
+    // quanto um Certificate.id público vindo da request — accessor faz a resolução.
+    const cert = await this.certAccessor.retrieve(params.companyId, params.certificateVaultRef);
     const { url, autorizadora } = SefazEndpoints.url(
       params.uf,
       params.ambiente,
@@ -87,7 +88,7 @@ export class SefazSoapClient {
     );
 
     const envelope = this.wrapInSoapEnvelope(params.bodyXml, params.service);
-    const httpsAgent = this.buildHttpsAgent(cert);
+    const httpsAgent = this.buildHttpsAgent(cert, params.ambiente);
     const httpClient = this.buildHttpClient(httpsAgent, params.timeoutMs ?? 30_000);
 
     const startedAt = Date.now();
@@ -162,22 +163,79 @@ export class SefazSoapClient {
     ].join('');
   }
 
-  private buildHttpsAgent(cert: RetrievedCertificate): https.Agent {
+  private buildHttpsAgent(
+    cert: RetrievedCertificate,
+    ambiente: AmbienteSefaz,
+  ): https.Agent {
     // mTLS: o cliente apresenta seu certificado (extraído do PFX) à SEFAZ.
     const { privateKeyPem, certificatePem } = NFeSigner.extractPemFromPkcs12(
       cert.content,
       cert.password,
     );
+
+    // SEFAZ usa cadeia ICP-Brasil que NÃO vem no trust store padrão do Node. Política:
+    //  1) Se `NFE_TLS_CA_BUNDLE` apontar para um arquivo PEM com as ACs ICP-Brasil,
+    //     usamos validação estrita com esse bundle — caminho recomendado para produção.
+    //     Como obter: baixe o bundle público (ITI/Serpro disponibilizam) e monte
+    //     o arquivo no container em `/app/certs/icp-brasil.pem` ou similar.
+    //  2) Sem bundle e em HOMOLOGAÇÃO: relaxamos `rejectUnauthorized` — ambiente
+    //     de testes é isolado e os certs do SEFAZ-HOM mudam frequentemente.
+    //  3) Sem bundle e em PRODUÇÃO: log explícito e fallback para os roots do Node.
+    //     Algumas autorizadoras já usam certs com cadeia incluída em DigiCert/Sectigo,
+    //     então pode funcionar; mas o caminho oficial é fornecer o bundle ICP.
+    const isHomologacao = ambiente === AmbienteSefaz.HOMOLOGACAO;
+    const ca = this.loadCaBundle();
+
+    let rejectUnauthorized: boolean;
+    if (ca) {
+      rejectUnauthorized = true;
+    } else if (isHomologacao) {
+      logger.warn(
+        'mTLS em HOMOLOGAÇÃO com rejectUnauthorized=false. Configure NFE_TLS_CA_BUNDLE para validação estrita.',
+      );
+      rejectUnauthorized = false;
+    } else {
+      logger.warn(
+        'NFE_TLS_CA_BUNDLE não definido em PRODUÇÃO — usando trust store padrão do Node. Cadeia ICP-Brasil pode não validar; configure o bundle para garantir.',
+      );
+      rejectUnauthorized = true;
+    }
+
     return new https.Agent({
       cert: certificatePem,
       key: privateKeyPem,
-      // SEFAZ usa cadeias raiz oficiais — em produção, manter `rejectUnauthorized: true`.
-      // Em testes contra ambientes locais (proxy/MITM), o operador pode desabilitar
-      // via env, mas o default é estrito.
-      rejectUnauthorized: true,
+      ca: ca ?? undefined,
+      rejectUnauthorized,
       // TLS 1.2 mínimo (SEFAZ não aceita TLS < 1.2; várias autorizadoras já só TLS 1.3).
       minVersion: 'TLSv1.2',
     });
+  }
+
+  // Cache do bundle PEM — leitura de disco a cada request seria desnecessária.
+  private static cachedCaBundle: string | null | undefined;
+
+  private loadCaBundle(): string | null {
+    if (SefazSoapClient.cachedCaBundle !== undefined) {
+      return SefazSoapClient.cachedCaBundle;
+    }
+    const path = process.env.NFE_TLS_CA_BUNDLE;
+    if (!path) {
+      SefazSoapClient.cachedCaBundle = null;
+      return null;
+    }
+    try {
+      const content = readFileSync(path, 'utf8');
+      logger.info({ path, bytes: content.length }, 'Bundle ICP-Brasil carregado para mTLS SEFAZ');
+      SefazSoapClient.cachedCaBundle = content;
+      return content;
+    } catch (err) {
+      logger.error(
+        { path, err: (err as Error).message },
+        'Falha ao ler NFE_TLS_CA_BUNDLE — caindo no trust store padrão',
+      );
+      SefazSoapClient.cachedCaBundle = null;
+      return null;
+    }
   }
 
   private buildHttpClient(httpsAgent: https.Agent, timeoutMs: number): AxiosInstance {

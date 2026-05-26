@@ -1,17 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, Loader2, Plus, Search } from 'lucide-react';
+import { Building2, Loader2, Pencil, Plus, Search } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
 import {
   createCompany,
   listCompanies,
+  updateCompany,
   type Company,
 } from '@/features/companies/companies-api';
 import {
   COMPANY_FORM_INITIAL,
   CompanyForm,
   companyFormToPayload,
+  companyToFormState,
   type CompanyFormState,
 } from '@/features/companies/CompanyForm';
 import { ApiError } from '@/lib/api';
@@ -40,6 +42,10 @@ export function CompaniesPage(): React.ReactElement {
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState<CompanyFormState>(COMPANY_FORM_INITIAL);
 
+  // Edicao: o id != null indica modo edit, e o form e hidratado pelo registro escolhido.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<CompanyFormState>(COMPANY_FORM_INITIAL);
+
   const { data: companies = [], isLoading } = useQuery({
     queryKey: ['companies'],
     queryFn: listCompanies,
@@ -59,8 +65,35 @@ export function CompaniesPage(): React.ReactElement {
     },
   });
 
+  const { mutate: salvarEdicao, isPending: salvandoEdicao } = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: ReturnType<typeof companyFormToPayload> }) => {
+      // No update, CNPJ nao vai (campo identitario imutavel no backend).
+      const { cnpj: _cnpj, ...rest } = payload;
+      void _cnpj;
+      return updateCompany(id, rest);
+    },
+    onSuccess: (updated) => {
+      void queryClient.invalidateQueries({ queryKey: ['companies'] });
+      toast.success(`"${updated.razaoSocial}" atualizada!`);
+      setEditingId(null);
+    },
+    onError: (err) => {
+      const msg = err instanceof ApiError ? err.message : 'Erro ao atualizar empresa.';
+      toast.error(msg);
+    },
+  });
+
+  function openEdit(c: Company): void {
+    setEditingId(c.id);
+    setEditForm(companyToFormState(c));
+  }
+
   function setField<K extends keyof CompanyFormState>(key: K, value: CompanyFormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function setEditField<K extends keyof CompanyFormState>(key: K, value: CompanyFormState[K]) {
+    setEditForm((prev) => ({ ...prev, [key]: value }));
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -70,6 +103,12 @@ export function CompaniesPage(): React.ReactElement {
       return;
     }
     criar(companyFormToPayload(form));
+  }
+
+  function handleSubmitEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingId) return;
+    salvarEdicao({ id: editingId, payload: companyFormToPayload(editForm) });
   }
 
   const filtered = companies.filter((c) => {
@@ -150,18 +189,70 @@ export function CompaniesPage(): React.ReactElement {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((company, i) => (
-            <CompanyCard key={company.id} company={company} delay={i * 60} />
+            <CompanyCard
+              key={company.id}
+              company={company}
+              delay={i * 60}
+              onEdit={() => openEdit(company)}
+            />
           ))}
         </div>
       )}
+
+      {/* Dialog de edição */}
+      <Dialog
+        open={editingId !== null}
+        onOpenChange={(o) => !o && setEditingId(null)}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Editar empresa</DialogTitle>
+            <DialogDescription>
+              CNPJ é imutável (afeta chave de acesso da NF-e). Para mudar de homologação
+              para produção, ajuste o campo <strong>Ambiente SEFAZ</strong> abaixo.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSubmitEdit}>
+            <CompanyForm
+              form={editForm}
+              setField={setEditField}
+              disabled={salvandoEdicao}
+              cnpjDisabled
+            />
+            <Button
+              type="submit"
+              variant="primary"
+              className="w-full mt-6"
+              disabled={salvandoEdicao}
+            >
+              {salvandoEdicao ? (
+                <>
+                  <Loader2 className="animate-spin" />
+                  Salvando…
+                </>
+              ) : (
+                'Salvar alterações'
+              )}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-function CompanyCard({ company, delay }: { company: Company; delay: number }) {
+function CompanyCard({
+  company,
+  delay,
+  onEdit,
+}: {
+  company: Company;
+  delay: number;
+  onEdit: () => void;
+}) {
   return (
     <Card
-      className="p-5 border-0 shadow-card hover:shadow-card-hover transition-all cursor-pointer group animate-fade-in"
+      className="p-5 border-0 shadow-card hover:shadow-card-hover transition-all group animate-fade-in"
       style={{ animationDelay: `${delay}ms` }}
     >
       <div className="flex items-start justify-between gap-2">
@@ -170,7 +261,7 @@ function CompanyCard({ company, delay }: { company: Company; delay: number }) {
             <Building2 className="h-6 w-6 text-primary" />
           </div>
           <div className="min-w-0">
-            <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors truncate">
+            <h3 className="font-semibold text-foreground truncate">
               {company.razaoSocial}
             </h3>
             {company.nomeFantasia && (
@@ -181,7 +272,19 @@ function CompanyCard({ company, delay }: { company: Company; delay: number }) {
             </p>
           </div>
         </div>
-        <EnvBadge env={company.ambienteSefaz} />
+        <div className="flex items-start gap-1 shrink-0">
+          <EnvBadge env={company.ambienteSefaz} />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={onEdit}
+            aria-label={`Editar ${company.razaoSocial}`}
+            title="Editar empresa"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
 
       <div className="mt-4 space-y-1.5 text-sm">

@@ -76,3 +76,13 @@ export async function listCompanies(): Promise<Company[]> {
 export async function createCompany(payload: CreateCompanyPayload): Promise<Company> {
   return api<Company>('/companies', { method: 'POST', body: payload });
 }
+
+/** Update parcial; CNPJ é imutável (backend rejeita se vier no payload). */
+export type UpdateCompanyPayload = Partial<Omit<CreateCompanyPayload, 'cnpj'>>;
+
+export async function updateCompany(
+  id: string,
+  payload: UpdateCompanyPayload,
+): Promise<Company> {
+  return api<Company>(`/companies/${id}`, { method: 'PUT', body: payload });
+}

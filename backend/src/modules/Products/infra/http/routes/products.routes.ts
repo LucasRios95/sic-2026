@@ -5,6 +5,7 @@ import { CreateProductController } from '@modules/Products/useCases/CreateProduc
 import { DeleteProductController } from '@modules/Products/useCases/DeleteProduct/DeleteProductController';
 import { GetProductController } from '@modules/Products/useCases/GetProduct/GetProductController';
 import { ListProductsController } from '@modules/Products/useCases/ListProducts/ListProductsController';
+import { ReplaceCurrentTaxRuleController } from '@modules/Products/useCases/ReplaceCurrentTaxRule/ReplaceCurrentTaxRuleController';
 import { UpdateProductController } from '@modules/Products/useCases/UpdateProduct/UpdateProductController';
 import { requireAuth } from '@shared/infra/http/middlewares/requireAuth';
 import { requirePermission } from '@shared/infra/http/middlewares/requirePermission';
@@ -15,6 +16,7 @@ import {
   createProductSchema,
   listProductsQuerySchema,
   productTaxRuleSchema,
+  replaceCurrentTaxRuleSchema,
   updateProductSchema,
 } from '../validators/productValidators';
 
@@ -26,6 +28,7 @@ const list = new ListProductsController();
 const get = new GetProductController();
 const remove = new DeleteProductController();
 const addRule = new AddProductTaxRuleController();
+const replaceCurrentRule = new ReplaceCurrentTaxRuleController();
 
 productsRoutes.use(requireAuth, tenantContext({ required: true }));
 
@@ -63,4 +66,13 @@ productsRoutes.post(
   requirePermission('tax-rule.write', 'catalog.write', 'admin.full'),
   validate({ body: productTaxRuleSchema }),
   (req, res) => addRule.handle(req, res),
+);
+
+// Substitui a regra vigente (fluxo "editar" para correções rápidas via UI). Atomicamente
+// encerra a janela aberta e cria uma nova vigente a partir de "agora". Histórico é preservado.
+productsRoutes.put(
+  '/:id/tax-rules/current',
+  requirePermission('tax-rule.write', 'catalog.write', 'admin.full'),
+  validate({ body: replaceCurrentTaxRuleSchema }),
+  (req, res) => replaceCurrentRule.handle(req, res),
 );

@@ -7,7 +7,7 @@ import { ICustomerRepository } from '@modules/Customers/repositories/ICustomerRe
 import { NotificationService } from '@modules/Notifications/NotificationService';
 import { SefazHealthMonitorService } from '@modules/SefazHealth/SefazHealthMonitorService';
 import { SefazHealthState } from '@modules/SefazHealth/domain/sefaz-health-enums';
-import { ICertificateVault } from '@shared/container/providers/CertificateVault/ICertificateVault';
+import { CertificateAccessor } from '@shared/container/providers/CertificateVault/CertificateAccessor';
 import { BusinessRuleError, NotFoundError } from '@shared/errors';
 import { logger } from '@shared/logger';
 
@@ -78,8 +78,8 @@ export class EmitirEpecUseCase {
     @inject(SefazSoapClient)
     private readonly soap: SefazSoapClient,
 
-    @inject('CertificateVault')
-    private readonly vault: ICertificateVault,
+    @inject(CertificateAccessor)
+    private readonly certAccessor: CertificateAccessor,
 
     @inject(AuditService)
     private readonly audit: AuditService,
@@ -161,7 +161,7 @@ export class EmitirEpecUseCase {
       createdBy: request.userId,
     });
 
-    const cert = await this.vault.retrieve(request.certificateVaultRef);
+    const cert = await this.certAccessor.retrieve(request.companyId, request.certificateVaultRef);
     const signedXml = this.signer.sign(xml, cert.content, cert.password, eventoId);
 
     // EPEC vai sempre para o ambiente nacional via NFeRecepcaoEvento4. SefazEndpoints

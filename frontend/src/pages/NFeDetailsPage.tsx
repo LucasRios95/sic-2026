@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useParams } from '@tanstack/react-router';
+import { useNavigate, useParams } from '@tanstack/react-router';
 import { useState } from 'react';
 
 import { listCertificates } from '@/features/certificates/certificates-api';
@@ -29,7 +29,10 @@ import { Textarea } from '@/shared/components/ui/Textarea';
 import { STATUS_LABEL, STATUS_STYLES } from '@/shared/types/fiscal';
 
 export function NFeDetailsPage(): React.ReactElement {
-  const { id } = useParams({ from: '/fiscal/nfe/$id' });
+  // O route ID inclui o id do layout pai (`/app-layout/...`) — TanStack Router
+  // monta o ID canônico a partir da árvore de routes, não da URL pública.
+  const { id } = useParams({ from: '/app-layout/fiscal/nfe/$id' });
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: nfe, isLoading, error } = useQuery({
     queryKey: ['nfe', id],
@@ -97,6 +100,9 @@ export function NFeDetailsPage(): React.ReactElement {
     ? (Date.now() - new Date(nfe.dhAutorizacao).getTime()) / 3_600_000
     : Infinity;
   const canCancel = isAuthorized && hoursSinceAuth <= 24;
+  // Reemissão: válida para NFe rejeitada ou que ficou pendente sem certificado
+  // (PENDING). Para PROCESSING o caminho correto é esperar a reconciliação.
+  const canReissue = nfe.status === 'REJECTED' || nfe.status === 'PENDING' || nfe.status === 'DENIED';
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -146,6 +152,20 @@ export function NFeDetailsPage(): React.ReactElement {
                 Cancelar
               </Button>
             </>
+          ) : null}
+          {canReissue ? (
+            <Button
+              variant="primary"
+              onClick={() =>
+                navigate({
+                  to: '/fiscal/nfe/new',
+                  search: { reissueFrom: id },
+                })
+              }
+              title="Cria nova NF-e com os mesmos dados desta (cliente, itens, transporte). A NF-e atual fica como histórico."
+            >
+              Reemitir
+            </Button>
           ) : null}
         </div>
       </header>

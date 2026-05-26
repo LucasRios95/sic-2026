@@ -65,4 +65,15 @@ export interface INFeRepository {
   ): Promise<NFe>;
   update(id: string, patch: Partial<NFe>): Promise<NFe>;
   list(filter: ListNFesFilter): Promise<{ items: NFe[]; total: number }>;
+  /** Localiza NFe pelo escopo (companyId+modelo+serie+numero) — usado pra detectar
+   * reuso de numero quando a anterior nao chegou a virar NFe valida. */
+  findByScope(
+    companyId: string,
+    modelo: string,
+    serie: number,
+    numero: string,
+  ): Promise<NFe | null>;
+  /** Hard delete (com cascata em items/pagamentos/eventos). Use APENAS para
+   * descartar NFe que nao chegou a SEFAZ (REJECTED/PENDING/DRAFT). */
+  hardDelete(id: string): Promise<void>;
 }

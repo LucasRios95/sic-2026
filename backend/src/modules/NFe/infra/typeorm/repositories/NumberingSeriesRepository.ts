@@ -75,4 +75,65 @@ export class NumberingSeriesRepository implements INumberingSeriesRepository {
       return { numero, serie, modelo };
     });
   }
+
+  async allocateSpecificNumber(
+    companyId: string,
+    modelo: string,
+    serie: number,
+    numeroForcado: string,
+  ): Promise<AllocatedNumber> {
+    return appDataSource.transaction(async (manager) => {
+      const series = await manager
+        .createQueryBuilder(NumberingSeries, 's')
+        .setLock('pessimistic_write')
+        .where('s.company_id = :companyId', { companyId })
+        .andWhere('s.modelo = :modelo', { modelo })
+        .andWhere('s.serie = :serie', { serie })
+        .getOne();
+
+      if (!series) {
+        throw new BusinessRuleError(
+          `Série ${serie}/modelo ${modelo} não cadastrada para esta empresa.`,
+          'NUMBERING_SERIES_NOT_FOUND',
+        );
+      }
+      if (!series.active) {
+        throw new BusinessRuleError(
+          `Série ${serie}/modelo ${modelo} está inativa`,
+          'NUMBERING_SERIES_INACTIVE',
+        );
+      }
+
+      const forcado = BigInt(numeroForcado);
+      const atual = BigInt(series.proximoNumero);
+      if (forcado < atual) {
+        // Já passou desse número — ou foi emitido ou foi inutilizado. Em qualquer
+        // caso, reusar quebra a unicidade global da chave de acesso da NF-e.
+        throw new BusinessRuleError(
+          `Número ${numeroForcado} já foi alocado nesta série. Próximo disponível: ${series.proximoNumero}.`,
+          'NUMBERING_SERIES_NUMBER_USED',
+          { proximo: series.proximoNumero, solicitado: numeroForcado },
+        );
+      }
+
+      const nextNumero = String(forcado + 1n);
+      await manager.update(
+        NumberingSeries,
+        { id: series.id },
+        { proximoNumero: nextNumero, ultimoUsado: numeroForcado },
+      );
+
+      return { numero: numeroForcado, serie, modelo };
+    });
+  }
+
+  async peekProximoNumero(
+    companyId: string,
+    modelo: string,
+    serie: number,
+  ): Promise<string> {
+    await this.ensureSeries(companyId, modelo, serie);
+    const series = await this.repo.findOne({ where: { companyId, modelo, serie } });
+    return series?.proximoNumero ?? '1';
+  }
 }

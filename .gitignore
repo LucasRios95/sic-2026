@@ -41,3 +41,8 @@ tmp/
 
 # Claude Code (local apenas)
 .claude/settings.local.json
+
+# Bundles de certificado ICP-Brasil — host-only
+certs/*.pem
+certs/*.crt
+certs/*.der

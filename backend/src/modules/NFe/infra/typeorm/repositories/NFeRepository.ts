@@ -83,6 +83,20 @@ export class NFeRepository implements INFeRepository {
     return updated;
   }
 
+  async findByScope(
+    companyId: string,
+    modelo: string,
+    serie: number,
+    numero: string,
+  ): Promise<NFe | null> {
+    return this.repo.findOne({ where: { companyId, modelo, serie, numero } });
+  }
+
+  async hardDelete(id: string): Promise<void> {
+    // Cascade via FK ON DELETE CASCADE em items/pagamentos/eventos (definido nas migrations).
+    await this.repo.delete({ id });
+  }
+
   async list(filter: ListNFesFilter): Promise<{ items: NFe[]; total: number }> {
     const { companyId, status, customerId, from, to, search, limit = 50, offset = 0 } = filter;
     const where: Record<string, unknown> = { companyId };

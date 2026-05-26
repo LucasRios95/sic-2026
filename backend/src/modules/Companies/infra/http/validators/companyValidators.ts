@@ -50,3 +50,9 @@ export const createCompanySchema = z.object({
   usaFcp: z.boolean().optional(),
   usaIcmsDesonerado: z.boolean().optional(),
 });
+
+/**
+ * Update aceita o mesmo conjunto de campos do create, todos opcionais. CNPJ não
+ * pode mudar (campo identitário — afeta chave de acesso da NF-e histórica).
+ */
+export const updateCompanySchema = createCompanySchema.omit({ cnpj: true }).partial();

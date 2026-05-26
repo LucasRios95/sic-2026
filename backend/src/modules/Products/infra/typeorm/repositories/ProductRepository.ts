@@ -48,10 +48,15 @@ export class ProductRepository implements IProductRepository {
     if (active !== undefined) qb.andWhere('p.active = :active', { active });
     if (ncm) qb.andWhere('p.ncm = :ncm', { ncm });
     if (search) {
+      // f_unaccent(lower(...)) pra acentos + índice GIN trigram em descricao/codigo.
+      // codigo_barras é match exato (sem normalização — é número impresso).
       qb.andWhere(
         new Brackets((b) => {
-          b.where('p.descricao ILIKE :term', { term: `%${search}%` })
-            .orWhere('p.codigo ILIKE :term', { term: `%${search}%` })
+          b.where(
+            `f_unaccent(lower(p.descricao)) LIKE f_unaccent(lower(:term))`,
+            { term: `%${search}%` },
+          )
+            .orWhere(`lower(p.codigo) LIKE lower(:term)`, { term: `%${search}%` })
             .orWhere('p.codigo_barras = :exact', { exact: search });
         }),
       );

@@ -20,6 +20,15 @@ export const emitirNFeSchema = z.object({
   idempotencyKey: z.string().min(8).max(80),
   customerId: z.string().uuid(),
   serie: z.number().int().positive().max(999),
+  /**
+   * Número da NF-e (opcional). BigInt como string para acomodar séries com
+   * histórico > 2^32. Quando omitido, o backend aloca automaticamente.
+   */
+  numero: z
+    .string()
+    .regex(/^[1-9]\d*$/, 'Número deve ser inteiro positivo (sem zeros à esquerda)')
+    .max(9, 'Número não pode ter mais de 9 dígitos (limite SEFAZ)')
+    .optional(),
   naturezaOperacao: z.string().min(2).max(60),
   dhEmissao: z.string().datetime({ offset: true }).optional(),
   dhSaiEnt: z.string().datetime({ offset: true }).optional(),

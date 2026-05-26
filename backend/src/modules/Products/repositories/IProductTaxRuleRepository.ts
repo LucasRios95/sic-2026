@@ -53,4 +53,11 @@ export interface IProductTaxRuleRepository {
    * Usada pelo motor tributário no momento da emissão (Fase 1a).
    */
   findActiveAt(productId: string, date: Date): Promise<ProductTaxRule | null>;
+  /**
+   * Encerra uma regra existente carimbando `validTo`. Usada pelo fluxo "substituir
+   * regra vigente" — fecha a janela aberta antes de inserir a nova com `validFrom`
+   * imediatamente após. Operação idempotente: setar validTo num registro já fechado
+   * sobrescreve com o novo valor.
+   */
+  setValidTo(ruleId: string, validTo: Date): Promise<void>;
 }

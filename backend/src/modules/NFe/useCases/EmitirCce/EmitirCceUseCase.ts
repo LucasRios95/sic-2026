@@ -3,7 +3,7 @@ import { inject, injectable } from 'tsyringe';
 import { AuditService } from '@modules/Auditoria/AuditService';
 import { ICompanyRepository } from '@modules/Companies/repositories/ICompanyRepository';
 import { NotificationService } from '@modules/Notifications/NotificationService';
-import { ICertificateVault } from '@shared/container/providers/CertificateVault/ICertificateVault';
+import { CertificateAccessor } from '@shared/container/providers/CertificateVault/CertificateAccessor';
 import { BusinessRuleError, NotFoundError, ValidationError } from '@shared/errors';
 
 import { DocumentStatus, TipoEventoNFe } from '../../domain/nfe-enums';
@@ -63,8 +63,8 @@ export class EmitirCceUseCase {
     @inject(SefazSoapClient)
     private readonly soap: SefazSoapClient,
 
-    @inject('CertificateVault')
-    private readonly vault: ICertificateVault,
+    @inject(CertificateAccessor)
+    private readonly certAccessor: CertificateAccessor,
 
     @inject(AuditService)
     private readonly audit: AuditService,
@@ -137,7 +137,7 @@ export class EmitirCceUseCase {
       createdBy: request.userId,
     });
 
-    const cert = await this.vault.retrieve(request.certificateVaultRef);
+    const cert = await this.certAccessor.retrieve(request.companyId, request.certificateVaultRef);
     const signedXml = this.signer.sign(xml, cert.content, cert.password, eventoId);
 
     const envEvento = [

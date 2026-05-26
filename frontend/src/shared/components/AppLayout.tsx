@@ -46,6 +46,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/fiscal/nfe', label: 'NF-e emitidas', icon: FileText, requiredPermission: 'nfe.read' },
       { to: '/fiscal/nfe/new', label: 'Emitir NF-e', icon: Plus, requiredPermission: 'nfe.emit' },
+      { to: '/fiscal/nfe/inutilizar', label: 'Inutilizar faixa', icon: Hash, requiredPermission: 'nfe.cancel' },
       { to: '/fiscal/recebidos', label: 'Notas recebidas', icon: ArrowDownLeft, requiredPermission: 'nfe.read' },
     ],
   },
@@ -132,7 +133,7 @@ export function AppLayout(): React.ReactElement {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
+      <nav className="flex-1 overflow-y-auto scrollbar-hidden px-3 py-4 space-y-5">
         {visibleGroups.map((group) => (
           <div key={group.label}>
             {!collapsed && (

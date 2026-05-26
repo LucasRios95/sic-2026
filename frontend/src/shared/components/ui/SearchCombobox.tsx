@@ -179,13 +179,16 @@ export const SearchCombobox = forwardRef<HTMLInputElement, SearchComboboxProps>(
               }}
             />
             <div className="absolute z-50 top-full left-0 right-0 mt-1 max-h-72 overflow-y-auto rounded-md border bg-popover shadow-elevated">
-              {loading ? (
-                <div className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Buscando…
+              {/* Spinner discreto no canto enquanto refazendo busca — não apaga a lista visível */}
+              {loading && (
+                <div className="absolute right-2 top-2 z-10 pointer-events-none">
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                 </div>
-              ) : options.length === 0 ? (
-                <div className="px-3 py-3 text-sm text-muted-foreground">{emptyHint}</div>
+              )}
+              {options.length === 0 ? (
+                <div className="px-3 py-3 text-sm text-muted-foreground">
+                  {loading ? 'Buscando…' : emptyHint}
+                </div>
               ) : (
                 <ul role="listbox" className="py-1">
                   {options.map((opt) => (
@@ -217,21 +220,28 @@ export const SearchCombobox = forwardRef<HTMLInputElement, SearchComboboxProps>(
 SearchCombobox.displayName = 'SearchCombobox';
 
 /**
- * useDebouncedCallback minimalista — evita criar nova promise/timer a cada keystroke.
- * Padrão "deixar o último ganhar".
+ * useDebouncedCallback minimalista — "deixar o último ganhar".
+ *
+ * Importante: retorna uma função com identidade ESTÁVEL entre renders. Sem isso,
+ * cada render produzia um novo `debouncedFetch`, o que disparava o useEffect que
+ * o consome em loop após cada `setLoading`. Resultado visível: o combobox piscava
+ * a cada ~250ms enquanto aberto. O padrão de `fnRef` evita stale closure sem
+ * trocar a identidade do retorno.
  */
 function useDebouncedCallback<Args extends unknown[]>(
   fn: (...args: Args) => void | Promise<void>,
   delay: number,
 ): (...args: Args) => void {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
   return useCallback(
     (...args: Args) => {
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => {
-        void fn(...args);
+        void fnRef.current(...args);
       }, delay);
     },
-    [fn, delay],
+    [delay],
   );
 }

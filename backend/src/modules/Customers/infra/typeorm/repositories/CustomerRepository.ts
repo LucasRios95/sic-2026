@@ -50,13 +50,22 @@ export class CustomerRepository implements ICustomerRepository {
 
     if (active !== undefined) qb.andWhere('c.active = :active', { active });
     if (search) {
-      // Filtra por nome OU CNPJ/CPF — caso comum no fluxo de emissão (faturista digita o que sabe).
+      // Busca insensível a acentos via f_unaccent(lower(...)). Casamento pela mesma
+      // expressão dos índices GIN trigram (idx_customers_nome_razao_trgm),
+      // permitindo index scan mesmo em padrões `%termo%`. O CNPJ/CPF é puro dígito,
+      // então um trgm comum basta.
+      // O OR no documento só entra quando o termo tem dígitos — caso contrário
+      // ILIKE '%%' casaria com tudo, anulando o filtro por nome.
+      const rawDigits = search.replace(/\D/g, '');
       qb.andWhere(
         new Brackets((b) => {
-          b.where('c.nome_razao ILIKE :term', { term: `%${search}%` }).orWhere(
-            'c.cnpj_cpf ILIKE :rawTerm',
-            { rawTerm: `%${search.replace(/\D/g, '')}%` },
+          b.where(
+            `f_unaccent(lower(c.nome_razao)) LIKE f_unaccent(lower(:term))`,
+            { term: `%${search}%` },
           );
+          if (rawDigits.length > 0) {
+            b.orWhere('c.cnpj_cpf LIKE :rawTerm', { rawTerm: `%${rawDigits}%` });
+          }
         }),
       );
     }

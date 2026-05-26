@@ -6,6 +6,7 @@ import { EmitirEpecController } from '@modules/NFe/useCases/EmitirEpec/EmitirEpe
 import { EmitirNFeController } from '@modules/NFe/useCases/EmitirNFe/EmitirNFeController';
 import { GenerateDanfeController } from '@modules/NFe/useCases/GenerateDanfe/GenerateDanfeController';
 import { GetNFeController } from '@modules/NFe/useCases/GetNFe/GetNFeController';
+import { GetProximoNumeroController } from '@modules/NFe/useCases/GetProximoNumero/GetProximoNumeroController';
 import { InutilizarNumeracaoController } from '@modules/NFe/useCases/InutilizarNumeracao/InutilizarNumeracaoController';
 import { ListNFesController } from '@modules/NFe/useCases/ListNFes/ListNFesController';
 import { SendNFeByEmailController } from '@modules/NFe/useCases/SendNFeByEmail/SendNFeByEmailController';
@@ -34,6 +35,7 @@ const cceController = new EmitirCceController();
 const epecController = new EmitirEpecController();
 const inutilizarController = new InutilizarNumeracaoController();
 const getController = new GetNFeController();
+const proximoNumeroController = new GetProximoNumeroController();
 const listController = new ListNFesController();
 const danfeController = new GenerateDanfeController();
 const sendEmailController = new SendNFeByEmailController();
@@ -54,6 +56,13 @@ nfeRoutes.get(
   requirePermission('nfe.read', 'nfe.emit', 'admin.full'),
   validate({ query: listNFesQuerySchema }),
   (req, res) => listController.handle(req, res),
+);
+// Peek do proximo numero da serie (sem reservar) — usado pela UI pra mostrar
+// e pre-popular o campo "Numero" no form de emissao.
+nfeRoutes.get(
+  '/proximo-numero',
+  requirePermission('nfe.emit', 'nfe.read', 'admin.full'),
+  (req, res) => proximoNumeroController.handle(req, res),
 );
 nfeRoutes.get(
   '/:id',

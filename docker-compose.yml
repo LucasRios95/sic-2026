@@ -129,6 +129,8 @@ services:
       STORAGE_DRIVER: filesystem
       STORAGE_PATH: /app/tmp/docs
       MAIL_HOST: ${MAIL_HOST:-}
+      # Bundle ICP-Brasil para mTLS estrito em produção. Em homologação fica vazio.
+      NFE_TLS_CA_BUNDLE: ${NFE_TLS_CA_BUNDLE:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -140,6 +142,9 @@ services:
       - ./backend:/app
       - sic_2026_backend_node_modules:/app/node_modules
       - sic_2026_backend_tmp:/app/tmp
+      # Pasta para o bundle ICP-Brasil (`certs/icp-brasil.pem`). Crie a pasta no
+      # host antes de subir o stack quando precisar usar produção.
+      - ./certs:/app/certs:ro
 
   worker:
     build:
@@ -170,6 +175,7 @@ services:
       STORAGE_DRIVER: filesystem
       STORAGE_PATH: /app/tmp/docs
       MAIL_HOST: ${MAIL_HOST:-}
+      NFE_TLS_CA_BUNDLE: ${NFE_TLS_CA_BUNDLE:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -181,6 +187,7 @@ services:
       - ./backend:/app
       - sic_2026_backend_node_modules:/app/node_modules
       - sic_2026_backend_tmp:/app/tmp
+      - ./certs:/app/certs:ro
 
   frontend:
     build:

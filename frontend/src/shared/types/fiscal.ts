@@ -96,10 +96,12 @@ export interface NFeListItem {
 export interface NFeItem {
   id: string;
   numeroItem: number;
+  productId?: string | null;
   codigo: string;
   descricao: string;
   ncm: string;
   cfop: string;
+  unidadeComercial?: string;
   quantidadeComercial: string;
   valorUnitario: string;
   valorTotal: string;

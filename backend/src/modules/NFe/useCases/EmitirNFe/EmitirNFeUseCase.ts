@@ -12,7 +12,7 @@ import { SefazHealthMonitorService } from '@modules/SefazHealth/SefazHealthMonit
 import { SefazHealthState } from '@modules/SefazHealth/domain/sefaz-health-enums';
 import { ContextoCalculo } from '@modules/TaxEngine/domain/ContextoCalculo';
 import { MotorTributario } from '@modules/TaxEngine/MotorTributario';
-import { ICertificateVault } from '@shared/container/providers/CertificateVault/ICertificateVault';
+import { CertificateAccessor } from '@shared/container/providers/CertificateVault/CertificateAccessor';
 import { BusinessRuleError, IntegrationError, NotFoundError } from '@shared/errors';
 import { logger } from '@shared/logger';
 
@@ -86,8 +86,8 @@ export class EmitirNFeUseCase {
     @inject(SefazSoapClient)
     private readonly soap: SefazSoapClient,
 
-    @inject('CertificateVault')
-    private readonly vault: ICertificateVault,
+    @inject(CertificateAccessor)
+    private readonly certAccessor: CertificateAccessor,
 
     @inject(AuditService)
     private readonly audit: AuditService,
@@ -137,9 +137,46 @@ export class EmitirNFeUseCase {
     const ano = dhEmissao.getUTCFullYear();
     const mes = dhEmissao.getUTCMonth() + 1;
 
-    // 3) Reserva número de forma atômica
+    // 3) Reserva número de forma atômica. Se o faturista informou um número
+    // explicito no payload (`request.numero`), tentamos honrar -- usado em
+    // re-alinhamento com talao fisico ou ao preencher buracos de escrituracao.
+    // Senao, alocamos o proximo automaticamente.
+    //
+    // ATENCAO ao "reuso": se ja existe NFe nesse (modelo, serie, numero) MAS
+    // em status que NAO consumiu numero fiscal (REJECTED/PENDING/DRAFT — nunca
+    // chegou a virar nota valida na SEFAZ), descartamos a antiga e liberamos o
+    // slot. Status AUTHORIZED/PROCESSING/CANCELLED/DENIED consomem oficialmente
+    // (precisam de Inutilizacao para reuso) — nesses, mantemos o erro.
     await this.numberingRepository.ensureSeries(company.id, '55', request.serie);
-    const allocated = await this.numberingRepository.allocateNumber(company.id, '55', request.serie);
+    let slotReleased = false;
+    if (request.numero) {
+      const existing = await this.nfeRepository.findByScope(
+        company.id,
+        '55',
+        request.serie,
+        request.numero,
+      );
+      const REUSABLE_STATUSES = ['REJECTED', 'PENDING', 'DRAFT'];
+      if (existing && REUSABLE_STATUSES.includes(existing.status)) {
+        await this.nfeRepository.hardDelete(existing.id);
+        slotReleased = true;
+      }
+    }
+    // Quando o slot foi liberado (NFe rejeitada/pendente descartada), evitamos
+    // `allocateSpecificNumber` porque ele bloqueia numeros abaixo do proximoNumero
+    // — o que e correto pro caso geral, mas conflita com reuso de slot livre.
+    // O INSERT subsequente respeita a unique constraint do banco; se houver race,
+    // a constraint pega.
+    const allocated = slotReleased
+      ? { numero: request.numero!, serie: request.serie, modelo: '55' }
+      : request.numero
+        ? await this.numberingRepository.allocateSpecificNumber(
+            company.id,
+            '55',
+            request.serie,
+            request.numero,
+          )
+        : await this.numberingRepository.allocateNumber(company.id, '55', request.serie);
 
     // 3a) EP-06c — decide forma de emissão consultando o monitor de saúde SEFAZ.
     //     Quando a autorizadora normal está DOWN e a SVC está UP/DEGRADED, roteamos para
@@ -562,7 +599,10 @@ export class EmitirNFeUseCase {
     request: EmitirNFeRequest,
     contingenciaSvc: boolean,
   ): Promise<NFe> {
-    const cert = await this.vault.retrieve(request.certificateVaultRef!);
+    // certificateVaultRef no payload é, na prática, o Certificate.id que o frontend
+    // recebeu no ListCertificates (o vault_ref real nunca sai do servidor). Aqui
+    // o accessor faz a resolução id → vault_ref antes de chamar o cofre.
+    const cert = await this.certAccessor.retrieve(persisted.companyId, request.certificateVaultRef!);
     const signedXml = this.signer.sign(xmlUnsigned, cert.content, cert.password, `NFe${chaveAcesso}`);
 
     // Envelope nfeAutorizacao4: precisa do <enviNFe> wrapping a <NFe> assinada.
@@ -814,6 +854,13 @@ export interface EmitirNFeRequest {
   companyId: string;
   customerId: string;
   serie: number;
+  /**
+   * Número explícito da NF-e (BigInt como string). Quando omitido, o backend aloca
+   * automaticamente o próximo da série. Quando informado, valida que não está
+   * abaixo do já usado e força esse valor — a sequência seguinte continua a partir dele.
+   * Usado pela UI quando o faturista quer alinhar com talão físico/escrituração.
+   */
+  numero?: string;
   naturezaOperacao: string;
   dhEmissao?: Date;
   dhSaiEnt?: Date;

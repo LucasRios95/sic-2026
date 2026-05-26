@@ -1,11 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, FileText, Info, Search, XCircle } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { listNcms, type Ncm } from '@/features/ncms/ncms-api';
 import { Card } from '@/shared/components/ui/Card';
 import { Input } from '@/shared/components/ui/Input';
 import { Label } from '@/shared/components/ui/Label';
+import { Pagination } from '@/shared/components/ui/Pagination';
+import { usePagination } from '@/shared/hooks/usePagination';
 
 const NIVEL_LABEL: Record<number, string> = {
   2: 'Capítulo',
@@ -28,15 +30,23 @@ const NIVEL_COLOR: Record<number, string> = {
 export function NcmsPage(): React.ReactElement {
   const [search, setSearch] = useState('');
   const [apenasNfe, setApenasNfe] = useState(true);
+  const pagination = usePagination({ initialPageSize: 50 });
+
+  useEffect(() => {
+    pagination.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, apenasNfe]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['ncms', { search, apenasNfe }],
+    queryKey: ['ncms', { search, apenasNfe }, pagination.page, pagination.pageSize],
     queryFn: () =>
       listNcms({
         search: search || undefined,
         apenasValidosNfe: apenasNfe,
-        limit: 100,
+        limit: pagination.pageSize,
+        offset: pagination.offset,
       }),
+    placeholderData: (prev) => prev,
   });
 
   const items = data?.data ?? [];
@@ -112,20 +122,21 @@ export function NcmsPage(): React.ReactElement {
         </Card>
       ) : (
         <>
-          <div
-            className="flex items-center justify-between text-xs text-muted-foreground animate-fade-in"
-            style={{ animationDelay: '150ms' }}
-          >
-            <Label className="text-xs">
-              Exibindo {items.length} de {total.toLocaleString('pt-BR')} resultados
-            </Label>
-          </div>
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {items.map((ncm, i) => (
               <NcmCard key={ncm.id} ncm={ncm} delay={i * 30} />
             ))}
           </div>
+
+          <Pagination
+            total={total}
+            page={pagination.page}
+            pageSize={pagination.pageSize}
+            onPageChange={pagination.setPage}
+            onPageSizeChange={pagination.setPageSize}
+            isLoading={isLoading}
+            className="pt-2"
+          />
         </>
       )}
     </div>

@@ -1,17 +1,19 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
-import { useMemo, useState } from 'react';
+import { useNavigate, useSearch } from '@tanstack/react-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { listCertificates } from '@/features/certificates/certificates-api';
-import { listCustomers } from '@/features/customers/customers-api';
+import { getCustomer, listCustomers } from '@/features/customers/customers-api';
 import {
   emitirNFe,
+  getNFe,
+  getProximoNumero,
   simulateTax,
   type FinalidadeNFe,
   type ModFrete,
   type TipoOperacao,
 } from '@/features/nfe/nfe-api';
-import { listProducts } from '@/features/products/products-api';
+import { getProduct, listProducts } from '@/features/products/products-api';
 import { ApiError } from '@/lib/api';
 import { Badge } from '@/shared/components/ui/Badge';
 import { Button } from '@/shared/components/ui/Button';
@@ -24,9 +26,11 @@ import {
 } from '@/shared/components/ui/Card';
 import { Input } from '@/shared/components/ui/Input';
 import { Label } from '@/shared/components/ui/Label';
+import { SearchCombobox, type ComboboxOption } from '@/shared/components/ui/SearchCombobox';
 import { Select } from '@/shared/components/ui/Select';
 import { Textarea } from '@/shared/components/ui/Textarea';
 import { useDebounce } from '@/shared/hooks/useDebounce';
+import type { Customer, Product } from '@/shared/types/fiscal';
 
 interface ItemRow {
   id: string;
@@ -65,8 +69,14 @@ const FINALIDADES_COM_REF: FinalidadeNFe[] = [
 
 export function NFeNewPage(): React.ReactElement {
   const navigate = useNavigate();
+  // Quando aberto via "Reemitir" em uma NF-e existente, o id vem em `?reissueFrom=`.
+  const { reissueFrom } = useSearch({ from: '/app-layout/fiscal/nfe/new' });
   const [customerId, setCustomerId] = useState('');
   const [serie, setSerie] = useState(1);
+  // Campo numero editavel. Pre-populado com o proximo da serie via GET
+  // /nfe/proximo-numero. Vazio = backend aloca automatico (mesmo comportamento de antes).
+  const [numero, setNumero] = useState('');
+  const [numeroEditado, setNumeroEditado] = useState(false);
   const [naturezaOperacao, setNaturezaOperacao] = useState('Venda de Mercadoria');
   const [tipoOperacao, setTipoOperacao] = useState<TipoOperacao>('SAIDA');
   const [finalidade, setFinalidade] = useState<FinalidadeNFe>('NORMAL');
@@ -96,23 +106,155 @@ export function NFeNewPage(): React.ReactElement {
   const exigeReferencia = FINALIDADES_COM_REF.includes(finalidade);
   const transporteHabilitado = modFrete !== 9;
 
-  const customersQuery = useQuery({
-    queryKey: ['customers', 'select'],
-    queryFn: () => listCustomers({ limit: 200 }),
-  });
-  const productsQuery = useQuery({
-    queryKey: ['products', 'select'],
-    queryFn: () => listProducts({ limit: 200 }),
-  });
+  // Cache local dos cadastros já vistos — alimentado pelo combobox e por
+  // chamadas `getCustomer/getProduct` quando o usuário pica um item.
+  // Evita listar 200 fixos (problema: cliente com nome 'Z' nunca aparecia).
+  //
+  // O cache vive como ref para que os callbacks `searchXxxOptions` / `loadXxxOption`
+  // tenham identidade estável (useCallback com deps vazias). Sem isso, cada update
+  // do cache trocava a referência do callback → useEffect do SearchCombobox
+  // disparava em loop → flicker visível durante a digitação.
+  const customerCacheRef = useRef<Record<string, Customer>>({});
+  const productCacheRef = useRef<Record<string, Product>>({});
+  const [customerCacheVersion, setCustomerCacheVersion] = useState(0);
+  const [productCacheVersion, setProductCacheVersion] = useState(0);
+  // versões são usadas só pra re-renderizar quando o cache muda; valor em si não importa.
+  void customerCacheVersion;
+  void productCacheVersion;
+
   const certificatesQuery = useQuery({
     queryKey: ['certificates'],
     queryFn: listCertificates,
   });
 
-  const activeCustomer = useMemo(
-    () => customersQuery.data?.items.find((c) => c.id === customerId),
-    [customersQuery.data, customerId],
+  // Le o proximo numero da serie (sem reservar). Re-roda quando o usuario troca
+  // a serie -- evita mostrar numero errado se o faturista mudar serie no meio.
+  // Se o usuario JA editou manualmente o campo, nao sobrescreve.
+  const proximoNumeroQuery = useQuery({
+    queryKey: ['proximoNumero', serie],
+    queryFn: () => getProximoNumero(serie),
+    enabled: serie > 0,
+  });
+
+  useEffect(() => {
+    if (proximoNumeroQuery.data && !numeroEditado) {
+      setNumero(proximoNumeroQuery.data.proximoNumero);
+    }
+  }, [proximoNumeroQuery.data, numeroEditado]);
+
+  // Quando o usuário muda o cliente selecionado, garante que temos o objeto completo
+  // (uf, consumidorFinal, indicadorIE — atributos que o simulate precisa).
+  const activeCustomerQuery = useQuery({
+    queryKey: ['customer', customerId],
+    queryFn: () => getCustomer(customerId),
+    enabled: !!customerId && !customerCacheRef.current[customerId],
+  });
+  const activeCustomer: Customer | undefined =
+    customerCacheRef.current[customerId] ?? activeCustomerQuery.data ?? undefined;
+
+  const renderCustomerOption = (c: Customer): ComboboxOption => ({
+    value: c.id,
+    label: `${c.nomeRazao} — ${c.cnpjCpf}`,
+    render: (
+      <div className="flex flex-col gap-0.5">
+        <span className="text-sm font-medium">{c.nomeRazao}</span>
+        <span className="text-xs text-muted-foreground">
+          {c.tipoPessoa} · {c.cnpjCpf} · {c.municipio}/{c.uf}
+        </span>
+      </div>
+    ),
+  });
+
+  const searchCustomersOptions = useCallback(
+    async (term: string): Promise<ComboboxOption[]> => {
+      const result = await listCustomers({ search: term || undefined, limit: 50 });
+      // Mutação direta na ref + sinal de versão pra re-renderizar (raro: só quando
+      // o usuário entrar em outra parte da UI que dependa do cache).
+      for (const c of result.items) customerCacheRef.current[c.id] = c;
+      setCustomerCacheVersion((v) => v + 1);
+      return result.items.map(renderCustomerOption);
+    },
+    [],
   );
+
+  const loadCustomerOption = useCallback(
+    async (id: string): Promise<ComboboxOption | null> => {
+      if (!id) return null;
+      const c = customerCacheRef.current[id] ?? (await getCustomer(id));
+      customerCacheRef.current[id] = c;
+      return renderCustomerOption(c);
+    },
+    [],
+  );
+
+  const renderProductOption = (p: Product): ComboboxOption => ({
+    value: p.id,
+    label: `${p.codigo} — ${p.descricao}`,
+    render: (
+      <div className="flex flex-col gap-0.5">
+        <span className="font-mono text-xs">{p.codigo}</span>
+        <span className="text-sm line-clamp-1">{p.descricao}</span>
+      </div>
+    ),
+  });
+
+  const searchProductsOptions = useCallback(
+    async (term: string): Promise<ComboboxOption[]> => {
+      const result = await listProducts({ search: term || undefined, limit: 50 });
+      for (const p of result.items) productCacheRef.current[p.id] = p;
+      setProductCacheVersion((v) => v + 1);
+      return result.items.map(renderProductOption);
+    },
+    [],
+  );
+
+  const loadProductOption = useCallback(
+    async (id: string): Promise<ComboboxOption | null> => {
+      if (!id) return null;
+      const p = productCacheRef.current[id] ?? (await getProduct(id));
+      productCacheRef.current[id] = p;
+      return renderProductOption(p);
+    },
+    [],
+  );
+
+  // --- Reemissao: quando aberto via /fiscal/nfe/new?reissueFrom=<id>, busca a NF-e
+  // original e popula o form (cliente, itens, pagamento, transporte, finalidade). A
+  // NF-e antiga fica como historico (status REJECTED/PENDING/DENIED); a nova nasce
+  // independente com novo idempotencyKey.
+  const reissueQuery = useQuery({
+    queryKey: ['nfe', reissueFrom, 'for-reissue'],
+    queryFn: () => getNFe(reissueFrom!),
+    enabled: !!reissueFrom,
+    staleTime: Infinity, // so carregar uma vez
+  });
+
+  const [reissuePrefilled, setReissuePrefilled] = useState(false);
+
+  useEffect(() => {
+    if (!reissueQuery.data || reissuePrefilled) return;
+    const source = reissueQuery.data;
+
+    // Cabecalho
+    if (source.customerId) setCustomerId(source.customerId);
+    if (source.naturezaOperacao) setNaturezaOperacao(source.naturezaOperacao);
+    setSerie(source.serie);
+
+    // Itens: usa productId quando disponivel (item NFe persiste a FK).
+    if (source.items.length > 0) {
+      setItems(
+        source.items.map((it) => ({
+          id: `row-${nextRowId++}`,
+          productId: it.productId ?? '',
+          cfop: it.cfop,
+          quantidade: it.quantidadeComercial,
+          valorUnitario: it.valorUnitario,
+        })),
+      );
+    }
+
+    setReissuePrefilled(true);
+  }, [reissueQuery.data, reissuePrefilled]);
 
   // Debounce do payload do simulate para evitar tempestade de requests enquanto digita.
   const simulateInput = useMemo(() => {
@@ -188,6 +330,11 @@ export function NFeNewPage(): React.ReactElement {
         idempotencyKey: `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         customerId,
         serie,
+        // Envia o numero so quando o faturista alterou OU quando o backend nao
+        // tem proximo (campo vazio). Se for o valor "natural" que veio do peek,
+        // omitimos -- backend aloca automatico do mesmo jeito (evita race se o
+        // numero foi reservado por outra emissao no meio).
+        numero: numero && numeroEditado ? numero : undefined,
         naturezaOperacao,
         tipoOperacao,
         finalidade,
@@ -204,9 +351,7 @@ export function NFeNewPage(): React.ReactElement {
             numeroItem: idx + 1,
             productId: it.productId,
             cfop: it.cfop,
-            unidadeComercial:
-              productsQuery.data?.items.find((p) => p.id === it.productId)?.unidadeComercial ??
-              'UN',
+            unidadeComercial: productCacheRef.current[it.productId]?.unidadeComercial ?? 'UN',
             quantidade: it.quantidade,
             valorUnitario: it.valorUnitario,
           })),
@@ -232,13 +377,21 @@ export function NFeNewPage(): React.ReactElement {
    * tem company.uf + customer.uf carregados e faz a substituição correta antes da
    * transmissão. Aqui só sugere; o faturista pode editar.
    */
-  function aplicarProduto(rowId: string, productId: string): void {
-    const product = productsQuery.data?.items.find((p) => p.id === productId);
-    const baseCfop = product
-      ? tipoOperacao === 'SAIDA'
-        ? product.cfopPadraoSaida
-        : product.cfopPadraoEntrada
-      : null;
+  async function aplicarProduto(rowId: string, productId: string): Promise<void> {
+    if (!productId) {
+      updateItem(rowId, { productId: '' });
+      return;
+    }
+    // Garante que temos o produto no cache (preenchido pelo combobox normalmente,
+    // mas pode faltar se o id veio de outra fonte).
+    let product = productCacheRef.current[productId];
+    if (!product) {
+      product = await getProduct(productId);
+      productCacheRef.current[productId] = product;
+      setProductCacheVersion((v) => v + 1);
+    }
+    const baseCfop =
+      tipoOperacao === 'SAIDA' ? product.cfopPadraoSaida : product.cfopPadraoEntrada;
     updateItem(rowId, { productId, ...(baseCfop ? { cfop: baseCfop } : {}) });
   }
 
@@ -249,11 +402,22 @@ export function NFeNewPage(): React.ReactElement {
   return (
     <div className="space-y-6 max-w-6xl">
       <header>
-        <h1 className="text-2xl font-bold tracking-tight">Nova NF-e</h1>
+        <h1 className="text-2xl font-bold tracking-tight">
+          {reissueFrom ? 'Reemitir NF-e' : 'Nova NF-e'}
+        </h1>
         <p className="text-muted-foreground">
-          Emissão de Nota Fiscal Eletrônica modelo 55 com pré-visualização tributária em
-          tempo real.
+          {reissueFrom
+            ? 'Os campos foram pré-preenchidos a partir de uma NF-e anterior. Ajuste o que precisar e emita — a nova nota é independente, com numeração própria.'
+            : 'Emissão de Nota Fiscal Eletrônica modelo 55 com pré-visualização tributária em tempo real.'}
         </p>
+        {reissueFrom && reissueQuery.data ? (
+          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Reemitindo a partir da NF-e nº{' '}
+            <strong>{String(reissueQuery.data.numero).padStart(9, '0')}</strong>{' '}
+            (status {reissueQuery.data.status}, motivo:{' '}
+            <em>{reissueQuery.data.xMotivo ?? 'sem mensagem'}</em>).
+          </div>
+        ) : null}
       </header>
 
       <div className="grid grid-cols-3 gap-4">
@@ -265,22 +429,48 @@ export function NFeNewPage(): React.ReactElement {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label>Cliente</Label>
-                <Select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
-                  <option value="">Selecione…</option>
-                  {customersQuery.data?.items.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.nomeRazao} — {c.cnpjCpf}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>Série</Label>
-                <Input
-                  type="number"
-                  value={serie}
-                  onChange={(e) => setSerie(Number(e.target.value))}
+                <SearchCombobox
+                  value={customerId}
+                  onChange={setCustomerId}
+                  fetchOptions={searchCustomersOptions}
+                  loadSelected={loadCustomerOption}
+                  placeholder="Buscar por nome ou CNPJ/CPF…"
+                  emptyHint="Nenhum cliente encontrado. Tente outra busca."
                 />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label>Série</Label>
+                  <Input
+                    type="number"
+                    value={serie}
+                    onChange={(e) => {
+                      setSerie(Number(e.target.value));
+                      setNumeroEditado(false); // re-sincroniza com proximo da nova serie
+                    }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Número</Label>
+                  <Input
+                    type="number"
+                    value={numero}
+                    onChange={(e) => {
+                      setNumero(e.target.value.replace(/\D/g, ''));
+                      setNumeroEditado(true);
+                    }}
+                    placeholder={proximoNumeroQuery.data?.proximoNumero ?? '...'}
+                  />
+                  {numeroEditado ? (
+                    <p className="text-[10px] text-amber-700">
+                      Editado · backend força este número
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-muted-foreground">
+                      Próximo da série · clique para editar
+                    </p>
+                  )}
+                </div>
               </div>
               <div className="space-y-1">
                 <Label>Tipo de operação (tpNF)</Label>
@@ -456,17 +646,14 @@ export function NFeNewPage(): React.ReactElement {
             >
               <div className="space-y-1">
                 <Label className="text-xs">Produto #{idx + 1}</Label>
-                <Select
+                <SearchCombobox
                   value={row.productId}
-                  onChange={(e) => aplicarProduto(row.id, e.target.value)}
-                >
-                  <option value="">Selecione…</option>
-                  {productsQuery.data?.items.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.codigo} — {p.descricao}
-                    </option>
-                  ))}
-                </Select>
+                  onChange={(id) => aplicarProduto(row.id, id)}
+                  fetchOptions={searchProductsOptions}
+                  loadSelected={loadProductOption}
+                  placeholder="Buscar por código ou descrição…"
+                  emptyHint="Nenhum produto encontrado."
+                />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">CFOP</Label>

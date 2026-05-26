@@ -27,4 +27,29 @@ export interface INumberingSeriesRepository {
     modelo: string,
     serie: number,
   ): Promise<AllocatedNumber>;
+
+  /**
+   * Aloca um número ESPECÍFICO informado pelo emissor. Caso de uso: a UI permite
+   * editar o número antes da emissão (faturista quer alinhar com o talão físico ou
+   * preencher buracos da escrituração).
+   *
+   * Regras:
+   *  - Número não pode estar abaixo do já usado (rejeita números repetidos)
+   *  - Após sucesso, `proximoNumero` da série passa a max(numeroForçado + 1, atual)
+   *    — assim emissões subsequentes continuam a sequência sem voltar atrás.
+   *  - Mesma garantia de lock pessimista do `allocateNumber`.
+   */
+  allocateSpecificNumber(
+    companyId: string,
+    modelo: string,
+    serie: number,
+    numeroForcado: string,
+  ): Promise<AllocatedNumber>;
+
+  /**
+   * Lê o próximo número da série SEM reservar. Usado pela UI pra mostrar ao
+   * faturista qual será o número da próxima nota antes do submit.
+   * Cria a série com proximoNumero=1 se não existir.
+   */
+  peekProximoNumero(companyId: string, modelo: string, serie: number): Promise<string>;
 }

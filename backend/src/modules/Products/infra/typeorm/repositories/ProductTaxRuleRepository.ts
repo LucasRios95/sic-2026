@@ -38,4 +38,8 @@ export class ProductTaxRuleRepository implements IProductTaxRuleRepository {
       order: { validFrom: 'DESC' },
     });
   }
+
+  async setValidTo(ruleId: string, validTo: Date): Promise<void> {
+    await this.repo.update({ id: ruleId }, { validTo });
+  }
 }

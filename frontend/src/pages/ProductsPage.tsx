@@ -1,14 +1,36 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Package, Plus, Search } from 'lucide-react';
-import { useState } from 'react';
+import { Calculator, Loader2, Package, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 import { listCfops } from '@/features/cfops/cfops-api';
 import { getNcm, listNcms } from '@/features/ncms/ncms-api';
-import { createProduct, listProducts } from '@/features/products/products-api';
+import {
+  createProduct,
+  deleteProduct,
+  getProductWithTaxRules,
+  listProducts,
+  replaceCurrentTaxRule,
+  updateProduct,
+  type ProductTaxRule,
+} from '@/features/products/products-api';
 import { ApiError } from '@/lib/api';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/shared/components/ui/AlertDialog';
 import { Button } from '@/shared/components/ui/Button';
 import { Card } from '@/shared/components/ui/Card';
+import { Modal } from '@/shared/components/ui/Modal';
+import { Pagination } from '@/shared/components/ui/Pagination';
+import { usePagination } from '@/shared/hooks/usePagination';
+import type { Product } from '@/shared/types/fiscal';
 import {
   Dialog,
   DialogContent,
@@ -84,10 +106,56 @@ export function ProductsPage(): React.ReactElement {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<FormState>(INITIAL);
 
+  const pagination = usePagination({ initialPageSize: 50 });
+
+  useEffect(() => {
+    pagination.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
   const { data, isLoading } = useQuery({
-    queryKey: ['products', search],
-    queryFn: () => listProducts({ search: search || undefined, limit: 100 }),
+    queryKey: ['products', search, pagination.page, pagination.pageSize],
+    queryFn: () =>
+      listProducts({
+        search: search || undefined,
+        limit: pagination.pageSize,
+        offset: pagination.offset,
+      }),
+    placeholderData: (prev) => prev,
   });
+
+  // Estados de edição/exclusão. O modal de edição é focado nos campos editáveis
+  // (descricao, ncm, unidades, origem, CFOPs) — código fica imutável e regra
+  // tributária tem fluxo próprio com vigência versionada.
+  const [editing, setEditing] = useState<Product | null>(null);
+  const [editForm, setEditForm] = useState({
+    descricao: '',
+    ncm: '',
+    cest: '',
+    origem: 0,
+    unidadeComercial: 'UN',
+    unidadeTributavel: 'UN',
+    cfopPadraoSaida: '',
+    cfopPadraoEntrada: '',
+  });
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
+
+  // Modal de regra tributária — operação independente da edição básica do produto.
+  const [taxRuleTarget, setTaxRuleTarget] = useState<Product | null>(null);
+
+  function openEdit(p: Product): void {
+    setEditing(p);
+    setEditForm({
+      descricao: p.descricao,
+      ncm: p.ncm,
+      cest: p.cest ?? '',
+      origem: p.origem,
+      unidadeComercial: p.unidadeComercial,
+      unidadeTributavel: p.unidadeTributavel,
+      cfopPadraoSaida: p.cfopPadraoSaida ?? '',
+      cfopPadraoEntrada: p.cfopPadraoEntrada ?? '',
+    });
+  }
 
   function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((p) => ({ ...p, [key]: value }));
@@ -124,6 +192,29 @@ export function ProductsPage(): React.ReactElement {
     },
     onError: (err) =>
       toast.error(err instanceof ApiError ? err.message : 'Falha ao criar produto'),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (params: { id: string; payload: Parameters<typeof updateProduct>[1] }) =>
+      updateProduct(params.id, params.payload),
+    onSuccess: (p) => {
+      toast.success(`Produto "${p.codigo}" atualizado!`);
+      setEditing(null);
+      void queryClient.invalidateQueries({ queryKey: ['products'] });
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.message : 'Falha ao atualizar produto'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteProduct,
+    onSuccess: () => {
+      toast.success(`Produto "${deleteTarget?.codigo}" excluído!`);
+      setDeleteTarget(null);
+      void queryClient.invalidateQueries({ queryKey: ['products'] });
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.message : 'Falha ao excluir produto'),
   });
 
   // ───── Sources para os Combobox ─────
@@ -489,27 +580,222 @@ export function ProductsPage(): React.ReactElement {
           </p>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in">
-          {data!.items.map((p) => (
-            <Card key={p.id} className="p-5 border-0 shadow-card hover:shadow-card-hover transition-all">
-              <div className="flex items-start gap-3">
-                <div className="rounded-xl bg-primary/10 p-2.5 shrink-0">
-                  <Package className="h-5 w-5 text-primary" />
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in">
+            {data!.items.map((p) => (
+              <Card key={p.id} className="p-5 border-0 shadow-card hover:shadow-card-hover transition-all">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-xl bg-primary/10 p-2.5 shrink-0">
+                    <Package className="h-5 w-5 text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-mono text-xs text-muted-foreground">{p.codigo}</p>
+                    <h3 className="font-semibold text-foreground line-clamp-2">{p.descricao}</h3>
+                  </div>
+                  <div className="flex items-start gap-1 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => setTaxRuleTarget(p)}
+                      aria-label={`Editar regra tributária de ${p.codigo}`}
+                      title="Regra tributária"
+                    >
+                      <Calculator className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => openEdit(p)}
+                      aria-label={`Editar ${p.codigo}`}
+                      title="Dados gerais"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                      onClick={() => setDeleteTarget(p)}
+                      aria-label={`Excluir ${p.codigo}`}
+                      title="Excluir"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-mono text-xs text-muted-foreground">{p.codigo}</p>
-                  <h3 className="font-semibold text-foreground line-clamp-2">{p.descricao}</h3>
+                <div className="mt-3 pt-3 border-t border-border space-y-1 text-xs">
+                  <Row label="NCM" value={p.ncm} mono />
+                  <Row label="Unidade" value={p.unidadeComercial} />
+                  <Row label="Origem" value={String(p.origem)} />
                 </div>
-              </div>
-              <div className="mt-3 pt-3 border-t border-border space-y-1 text-xs">
-                <Row label="NCM" value={p.ncm} mono />
-                <Row label="Unidade" value={p.unidadeComercial} />
-                <Row label="Origem" value={String(p.origem)} />
-              </div>
-            </Card>
-          ))}
-        </div>
+              </Card>
+            ))}
+          </div>
+          <Pagination
+            total={data?.total ?? 0}
+            page={pagination.page}
+            pageSize={pagination.pageSize}
+            onPageChange={pagination.setPage}
+            onPageSizeChange={pagination.setPageSize}
+            isLoading={isLoading}
+            className="pt-2"
+          />
+        </>
       )}
+
+      <Modal
+        open={editing !== null}
+        title="Editar produto"
+        description={`Código ${editing?.codigo ?? ''} — alterações na regra tributária têm fluxo próprio (com vigência versionada).`}
+        onClose={() => setEditing(null)}
+        onConfirm={() => {
+          if (!editing) return;
+          updateMutation.mutate({
+            id: editing.id,
+            payload: {
+              descricao: editForm.descricao,
+              ncm: editForm.ncm,
+              cest: editForm.cest || null,
+              origem: editForm.origem,
+              unidadeComercial: editForm.unidadeComercial,
+              unidadeTributavel: editForm.unidadeTributavel,
+              cfopPadraoSaida: editForm.cfopPadraoSaida || null,
+              cfopPadraoEntrada: editForm.cfopPadraoEntrada || null,
+            },
+          });
+        }}
+        confirmLabel="Salvar"
+        loading={updateMutation.isPending}
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2 space-y-1">
+            <Label>Descrição</Label>
+            <Input
+              value={editForm.descricao}
+              onChange={(e) => setEditForm((f) => ({ ...f, descricao: e.target.value }))}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>NCM (8 dígitos)</Label>
+            <Input
+              value={editForm.ncm}
+              maxLength={8}
+              onChange={(e) =>
+                setEditForm((f) => ({ ...f, ncm: e.target.value.replace(/\D/g, '') }))
+              }
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>CEST (7 dígitos, opcional)</Label>
+            <Input
+              value={editForm.cest}
+              maxLength={7}
+              onChange={(e) =>
+                setEditForm((f) => ({ ...f, cest: e.target.value.replace(/\D/g, '') }))
+              }
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>Origem</Label>
+            <Select
+              value={String(editForm.origem)}
+              onChange={(e) =>
+                setEditForm((f) => ({ ...f, origem: Number(e.target.value) }))
+              }
+            >
+              {ORIGEM_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label>Unidade comercial</Label>
+            <Input
+              value={editForm.unidadeComercial}
+              maxLength={6}
+              onChange={(e) =>
+                setEditForm((f) => ({ ...f, unidadeComercial: e.target.value.toUpperCase() }))
+              }
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>Unidade tributável</Label>
+            <Input
+              value={editForm.unidadeTributavel}
+              maxLength={6}
+              onChange={(e) =>
+                setEditForm((f) => ({ ...f, unidadeTributavel: e.target.value.toUpperCase() }))
+              }
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>CFOP saída padrão</Label>
+            <Input
+              value={editForm.cfopPadraoSaida}
+              maxLength={4}
+              onChange={(e) =>
+                setEditForm((f) => ({ ...f, cfopPadraoSaida: e.target.value.replace(/\D/g, '') }))
+              }
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>CFOP entrada padrão</Label>
+            <Input
+              value={editForm.cfopPadraoEntrada}
+              maxLength={4}
+              onChange={(e) =>
+                setEditForm((f) => ({
+                  ...f,
+                  cfopPadraoEntrada: e.target.value.replace(/\D/g, ''),
+                }))
+              }
+            />
+          </div>
+        </div>
+      </Modal>
+
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir produto?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong>{deleteTarget?.codigo}</strong> — {deleteTarget?.descricao} será marcado
+              como inativo. Itens já emitidos em NF-e não são afetados. A exclusão será rejeitada
+              pelo backend caso exista regra tributária vigente ou futura para este produto.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={(e) => {
+                e.preventDefault();
+                if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
+              }}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? 'Excluindo…' : 'Excluir'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <TaxRuleModal
+        product={taxRuleTarget}
+        onClose={() => setTaxRuleTarget(null)}
+        onSaved={() => {
+          setTaxRuleTarget(null);
+          // tax-simulate da NFeNewPage não cacheia por produto, mas invalidar não custa.
+          void queryClient.invalidateQueries({ queryKey: ['products'] });
+        }}
+      />
     </div>
   );
 }
@@ -540,5 +826,288 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
       <span className="text-muted-foreground">{label}</span>
       <span className={`text-foreground font-medium ${mono ? 'font-mono' : ''}`}>{value}</span>
     </div>
+  );
+}
+
+// =============================================================================
+// TaxRuleModal — edita a regra tributária VIGENTE do produto.
+//
+// O backend trata como "substituir": fecha a janela aberta (validTo = agora) e
+// cria uma nova com os valores informados (validFrom = agora). Histórico fica
+// preservado em product_tax_rules pra auditoria fiscal.
+//
+// UI mostra só os campos comuns; o esquema completo tem ~30 campos (ST, FCP, IPI
+// por unidade, IS — caso especial) que ficam pra um modo "avançado" futuro.
+// =============================================================================
+
+type ImpostoMode = 'simples' | 'normal';
+
+interface TaxRuleFormState {
+  mode: ImpostoMode;
+  // ICMS comum
+  csosnIcms: string;
+  cstIcms: string;
+  aliqIcms: string;
+  // PIS / COFINS (geralmente CST 49 = outras operações, alíquota 0 para SN)
+  cstPis: string;
+  aliqPis: string;
+  cstCofins: string;
+  aliqCofins: string;
+  // IBS / CBS (Reforma) — defaults conservadores
+  cstIbsCbs: string;
+  cClassTrib: string;
+}
+
+const EMPTY_TAX_FORM: TaxRuleFormState = {
+  mode: 'simples',
+  csosnIcms: '102',
+  cstIcms: '00',
+  aliqIcms: '18.0000',
+  cstPis: '49',
+  aliqPis: '0',
+  cstCofins: '49',
+  aliqCofins: '0',
+  cstIbsCbs: 'TRIBUTACAO_INTEGRAL',
+  cClassTrib: '100000',
+};
+
+function ruleToForm(rule: ProductTaxRule | undefined): TaxRuleFormState {
+  if (!rule) return EMPTY_TAX_FORM;
+  return {
+    mode: rule.csosnIcms ? 'simples' : 'normal',
+    csosnIcms: rule.csosnIcms ?? '102',
+    cstIcms: rule.cstIcms ?? '00',
+    aliqIcms: rule.aliqIcms ?? '18.0000',
+    cstPis: rule.cstPis ?? '49',
+    aliqPis: rule.aliqPis ?? '0',
+    cstCofins: rule.cstCofins ?? '49',
+    aliqCofins: rule.aliqCofins ?? '0',
+    cstIbsCbs: rule.cstIbsCbs ?? 'TRIBUTACAO_INTEGRAL',
+    cClassTrib: rule.cClassTrib ?? '100000',
+  };
+}
+
+interface TaxRuleModalProps {
+  product: Product | null;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function TaxRuleModal({ product, onClose, onSaved }: TaxRuleModalProps): React.ReactElement {
+  const [form, setForm] = useState<TaxRuleFormState>(EMPTY_TAX_FORM);
+  const open = product !== null;
+
+  // Carrega a regra vigente sempre que o produto-alvo muda.
+  const detailsQuery = useQuery({
+    queryKey: ['product-with-tax-rules', product?.id],
+    queryFn: () => getProductWithTaxRules(product!.id),
+    enabled: open,
+  });
+
+  // Hidrata o form quando a regra chega do servidor.
+  useEffect(() => {
+    if (!detailsQuery.data) return;
+    const now = Date.now();
+    const active = detailsQuery.data.taxRules.find(
+      (r) =>
+        new Date(r.validFrom).getTime() <= now &&
+        (!r.validTo || new Date(r.validTo).getTime() > now),
+    );
+    setForm(ruleToForm(active));
+  }, [detailsQuery.data]);
+
+  const replaceMutation = useMutation({
+    mutationFn: () => {
+      if (!product) throw new Error('Sem produto');
+      // Monta o payload: só envia CSOSN ou CST conforme o modo selecionado.
+      const isSimples = form.mode === 'simples';
+      return replaceCurrentTaxRule(product.id, {
+        csosnIcms: isSimples ? form.csosnIcms : null,
+        cstIcms: isSimples ? null : form.cstIcms,
+        aliqIcms: isSimples ? null : form.aliqIcms,
+        cstPis: form.cstPis || null,
+        aliqPis: form.aliqPis || null,
+        cstCofins: form.cstCofins || null,
+        aliqCofins: form.aliqCofins || null,
+        cstIbsCbs: form.cstIbsCbs || null,
+        cClassTrib: form.cClassTrib || null,
+      });
+    },
+    onSuccess: () => {
+      toast.success('Regra tributária atualizada!');
+      onSaved();
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.message : 'Falha ao atualizar regra'),
+  });
+
+  return (
+    <Modal
+      open={open}
+      title="Regra tributária"
+      description={
+        product
+          ? `${product.codigo} — ${product.descricao}. Salvar encerra a regra atual e abre uma nova vigente a partir de agora.`
+          : ''
+      }
+      onClose={onClose}
+      onConfirm={() => replaceMutation.mutate()}
+      confirmLabel="Salvar regra"
+      loading={replaceMutation.isPending}
+    >
+      {detailsQuery.isLoading ? (
+        <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Carregando regra atual…
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div>
+            <Label>Regime ICMS</Label>
+            <div className="mt-1 flex gap-2 text-sm">
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input
+                  type="radio"
+                  checked={form.mode === 'simples'}
+                  onChange={() => setForm((f) => ({ ...f, mode: 'simples' }))}
+                />
+                Simples Nacional (CSOSN)
+              </label>
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input
+                  type="radio"
+                  checked={form.mode === 'normal'}
+                  onChange={() => setForm((f) => ({ ...f, mode: 'normal' }))}
+                />
+                Regime Normal (CST)
+              </label>
+            </div>
+          </div>
+
+          {form.mode === 'simples' ? (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>CSOSN</Label>
+                <Select
+                  value={form.csosnIcms}
+                  onChange={(e) => setForm((f) => ({ ...f, csosnIcms: e.target.value }))}
+                >
+                  <option value="101">101 — Tributada SN com permissão de crédito</option>
+                  <option value="102">102 — Tributada SN sem permissão de crédito</option>
+                  <option value="103">103 — Isenção do ICMS (faixa de receita)</option>
+                  <option value="201">201 — Tributada SN com permissão + ICMS-ST</option>
+                  <option value="202">202 — Tributada SN sem permissão + ICMS-ST</option>
+                  <option value="500">500 — ICMS cobrado anteriormente por ST</option>
+                  <option value="900">900 — Outros</option>
+                </Select>
+              </div>
+              <p className="col-span-2 text-xs text-muted-foreground">
+                No Simples Nacional, o ICMS NÃO é destacado na NF-e — vai como informativo no
+                CSOSN. Para destacar valor de crédito ao cliente PJ, use CSOSN 101 e configure
+                a alíquota de cálculo de crédito no faturamento.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>CST ICMS</Label>
+                <Select
+                  value={form.cstIcms}
+                  onChange={(e) => setForm((f) => ({ ...f, cstIcms: e.target.value }))}
+                >
+                  <option value="00">00 — Tributação integral</option>
+                  <option value="10">10 — Tributada + ICMS-ST</option>
+                  <option value="20">20 — Com redução de base</option>
+                  <option value="30">30 — Isenta/não tributada + ICMS-ST</option>
+                  <option value="40">40 — Isenta</option>
+                  <option value="41">41 — Não tributada</option>
+                  <option value="50">50 — Suspensão</option>
+                  <option value="51">51 — Diferimento</option>
+                  <option value="60">60 — ICMS cobrado anteriormente por ST</option>
+                  <option value="70">70 — Com redução de base + ICMS-ST</option>
+                  <option value="90">90 — Outros</option>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Alíquota ICMS (%)</Label>
+                <Input
+                  value={form.aliqIcms}
+                  onChange={(e) => setForm((f) => ({ ...f, aliqIcms: e.target.value }))}
+                  placeholder="18.0000"
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="border-t border-border pt-4">
+            <h4 className="text-sm font-semibold mb-2">PIS / COFINS</h4>
+            <div className="grid grid-cols-4 gap-3">
+              <div className="space-y-1">
+                <Label>CST PIS</Label>
+                <Input
+                  value={form.cstPis}
+                  onChange={(e) => setForm((f) => ({ ...f, cstPis: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Alíq. PIS (%)</Label>
+                <Input
+                  value={form.aliqPis}
+                  onChange={(e) => setForm((f) => ({ ...f, aliqPis: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>CST COFINS</Label>
+                <Input
+                  value={form.cstCofins}
+                  onChange={(e) => setForm((f) => ({ ...f, cstCofins: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Alíq. COFINS (%)</Label>
+                <Input
+                  value={form.aliqCofins}
+                  onChange={(e) => setForm((f) => ({ ...f, aliqCofins: e.target.value }))}
+                />
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Empresas do Simples Nacional usam CST 49 (outras operações) com alíquota 0 — PIS/
+              COFINS é pago via DAS, sem destaque na nota.
+            </p>
+          </div>
+
+          <div className="border-t border-border pt-4">
+            <h4 className="text-sm font-semibold mb-2">IBS / CBS (Reforma 2026+)</h4>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>CST IBS/CBS</Label>
+                <Select
+                  value={form.cstIbsCbs}
+                  onChange={(e) => setForm((f) => ({ ...f, cstIbsCbs: e.target.value }))}
+                >
+                  <option value="TRIBUTACAO_INTEGRAL">000 — Tributação integral</option>
+                  <option value="REDUCAO_ALIQUOTA">200 — Redução de alíquota</option>
+                  <option value="REDUCAO_BASE_CALCULO">210 — Redução de base</option>
+                  <option value="DIFERIMENTO">410 — Diferimento</option>
+                  <option value="SUSPENSAO">510 — Suspensão</option>
+                  <option value="ISENCAO">610 — Isenção</option>
+                  <option value="IMUNIDADE">620 — Imunidade</option>
+                  <option value="NAO_INCIDENCIA">630 — Não incidência</option>
+                  <option value="CREDITO_PRESUMIDO">800 — Crédito presumido</option>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>cClassTrib</Label>
+                <Input
+                  value={form.cClassTrib}
+                  onChange={(e) => setForm((f) => ({ ...f, cClassTrib: e.target.value }))}
+                  placeholder="100000"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
