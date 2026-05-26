@@ -58,6 +58,8 @@ export interface ICreateProductDTO {
   origem: number;
   unidadeComercial: string;
   unidadeTributavel: string;
+  cfopPadraoSaida?: string | null;
+  cfopPadraoEntrada?: string | null;
   pesoLiquido?: string | null;
   pesoBruto?: string | null;
   controlaEstoque?: boolean;

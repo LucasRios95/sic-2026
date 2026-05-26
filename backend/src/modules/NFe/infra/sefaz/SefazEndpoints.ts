@@ -99,6 +99,21 @@ export class SefazEndpoints {
    * (definição oficial: SP, RJ, ES, MG, BA, GO, PR → SVC-AN; demais → SVC-RS — varia
    * por nota técnica, conferir antes de operar).
    */
+  /**
+   * Resolve só a autorizadora normal de uma UF (sem montar URL). Útil para o monitor
+   * de saúde decidir se a autorizadora está UP/DOWN antes de transmitir.
+   */
+  static autorizadoraDeUf(uf: string): string {
+    const autorizadora = UF_AUTORIZADORA[uf];
+    if (!autorizadora) throw new Error(`UF ${uf} sem autorizadora mapeada`);
+    return autorizadora;
+  }
+
+  /** Qual SVC atende a UF informada — SVC-AN ou SVC-RS. */
+  static svcDeUf(uf: string): 'SVC-AN' | 'SVC-RS' {
+    return svcAnUfs.includes(uf) ? 'SVC-AN' : 'SVC-RS';
+  }
+
   static url(
     uf: string,
     ambiente: AmbienteSefaz,

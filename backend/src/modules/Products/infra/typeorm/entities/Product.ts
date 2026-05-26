@@ -63,6 +63,21 @@ export class Product extends BaseEntity {
   @Column({ name: 'unidade_tributavel', type: 'varchar', length: 6 })
   unidadeTributavel!: string;
 
+  /**
+   * CFOP padrão sugerido em vendas (5xxx para operação estadual). Quando a venda for
+   * interestadual, o use case `EmitirNFe` troca automaticamente para o 6xxx equivalente
+   * (substituindo o primeiro dígito). Opcional — quando vazio, o faturista informa manualmente.
+   */
+  @Column({ name: 'cfop_padrao_saida', type: 'char', length: 4, nullable: true })
+  cfopPadraoSaida?: string | null;
+
+  /**
+   * CFOP padrão sugerido em entradas (1xxx estadual ou 2xxx interestadual). Útil quando
+   * o produto é entrada típica (compra para revenda, insumo). Opcional.
+   */
+  @Column({ name: 'cfop_padrao_entrada', type: 'char', length: 4, nullable: true })
+  cfopPadraoEntrada?: string | null;
+
   @Column({
     name: 'peso_liquido',
     type: 'numeric',

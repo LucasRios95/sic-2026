@@ -58,4 +58,11 @@ export class BeneficioFiscalUfRepository implements IBeneficioFiscalUfRepository
     const created = this.repo.create(data);
     return this.repo.save(created);
   }
+
+  async listAll(): Promise<BeneficioFiscalUf[]> {
+    return this.repo.find({
+      order: { uf: 'ASC', ncm: 'ASC', codBeneficio: 'ASC' },
+      take: 1000,
+    });
+  }
 }

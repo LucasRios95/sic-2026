@@ -1,0 +1,207 @@
+# Orquestração de desenvolvimento — stack completa com hot-reload.
+#
+# Uso:
+#   docker compose up -d              → sobe tudo (db + redis + migrate + backend + worker + frontend)
+#   docker compose logs -f backend    → segue logs da API
+#   docker compose exec backend sh    → shell no container backend
+#   docker compose down               → para todos os containers (preserva volumes)
+#   docker compose down -v            → para + apaga dados do banco (cuidado!)
+#
+# Acessos:
+#   Backend API   http://localhost:3333
+#   Frontend      http://localhost:5173
+#   Postgres      localhost:5432  (user/pass: postgres/postgres)
+#   Redis         localhost:6379
+#
+# Credenciais admin (criadas pelo seed): admin@sic.local / Admin@123
+#
+# Hot-reload:
+#   - backend/worker: tsx watch (recompila ao editar .ts).
+#   - frontend: Vite HMR (atualiza navegador automaticamente).
+# Bind mount em ./backend e ./frontend → mudanças no host refletem instantaneamente.
+# node_modules ficam em volume nomeado para não conflitar com instalação do host
+# (binários compilados para a plataforma do container).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sic_2026_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASS:-postgres}
+      POSTGRES_DB: ${DB_NAME:-sic_2026}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - sic_2026_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-sic_2026}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: sic_2026_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - sic_2026_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot: roda migrations + seed. Sai com 0 ao terminar. Backend só sobe depois
+  # que este serviço sai com sucesso (depends_on condition: service_completed_successfully).
+  # Re-rodar é seguro: migrations são idempotentes (TypeORM controla o que já aplicou)
+  # e o seed usa `ON CONFLICT DO UPDATE`.
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: sic_2026_migrate
+    command: sh -c "npm run migration:run && npm run seed"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASS: ${DB_PASS:-postgres}
+      DB_NAME: ${DB_NAME:-sic_2026}
+      DB_SCHEMA: public
+      DB_SYNCHRONIZE: "false"
+      DB_LOGGING: "false"
+      NODE_ENV: development
+      LOG_LEVEL: info
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-troque-em-prod-pelo-menos-32-chars}
+      BCRYPT_COST: "10"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - sic_2026_backend_node_modules:/app/node_modules
+    restart: "no"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: sic_2026_backend
+    command: npm run dev
+    ports:
+      - "3333:3333"
+    environment:
+      NODE_ENV: development
+      PORT: 3333
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      # tsx watch usa chokidar internamente. Em Docker Desktop (Win/Mac), eventos
+      # de filesystem do host nem sempre propagam para o container — polling força
+      # detecção correta. Custo: ~3-5% CPU ocioso.
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "500"
+      # Conecta pelos nomes de serviço do Compose, não localhost.
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASS: ${DB_PASS:-postgres}
+      DB_NAME: ${DB_NAME:-sic_2026}
+      DB_SCHEMA: public
+      DB_SYNCHRONIZE: "false"
+      DB_LOGGING: ${DB_LOGGING:-false}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      QUEUE_PREFIX: sic2026
+      # JWT_SECRET tem default ruim de propósito — em prod usar cofre + variável real.
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-troque-em-prod-pelo-menos-32-chars}
+      JWT_ACCESS_TOKEN_EXPIRES_IN: 15m
+      JWT_REFRESH_TOKEN_EXPIRES_IN: 7d
+      BCRYPT_COST: "10"
+      LOGIN_MAX_ATTEMPTS: "5"
+      LOGIN_LOCK_DURATION_MINUTES: "15"
+      CORS_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:5174
+      VAULT_DRIVER: ${VAULT_DRIVER:-memory}
+      VAULT_PATH: /app/tmp/vault
+      VAULT_MASTER_KEY: ${VAULT_MASTER_KEY:-}
+      STORAGE_DRIVER: filesystem
+      STORAGE_PATH: /app/tmp/docs
+      MAIL_HOST: ${MAIL_HOST:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend:/app
+      - sic_2026_backend_node_modules:/app/node_modules
+      - sic_2026_backend_tmp:/app/tmp
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: sic_2026_worker
+    command: npm run worker
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "500"
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASS: ${DB_PASS:-postgres}
+      DB_NAME: ${DB_NAME:-sic_2026}
+      DB_SCHEMA: public
+      DB_SYNCHRONIZE: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      QUEUE_PREFIX: sic2026
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-troque-em-prod-pelo-menos-32-chars}
+      BCRYPT_COST: "10"
+      VAULT_DRIVER: ${VAULT_DRIVER:-memory}
+      VAULT_PATH: /app/tmp/vault
+      VAULT_MASTER_KEY: ${VAULT_MASTER_KEY:-}
+      STORAGE_DRIVER: filesystem
+      STORAGE_PATH: /app/tmp/docs
+      MAIL_HOST: ${MAIL_HOST:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend:/app
+      - sic_2026_backend_node_modules:/app/node_modules
+      - sic_2026_backend_tmp:/app/tmp
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: sic_2026_frontend
+    command: npm run dev -- --host 0.0.0.0
+    ports:
+      - "5173:5173"
+    environment:
+      # O navegador roda no host, então a URL da API permanece http://localhost:3333.
+      VITE_API_BASE_URL: http://localhost:3333
+    volumes:
+      - ./frontend:/app
+      - sic_2026_frontend_node_modules:/app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  sic_2026_postgres_data:
+  sic_2026_redis_data:
+  sic_2026_backend_node_modules:
+  sic_2026_backend_tmp:
+  sic_2026_frontend_node_modules:

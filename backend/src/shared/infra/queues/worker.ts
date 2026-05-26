@@ -14,6 +14,8 @@ import { CertificateExpiryWorker } from '@modules/Certificates/infra/queues/Cert
 import { IIntegrationCredentialResolver } from '@modules/NFe/infra/queues/IIntegrationCredentialResolver';
 import { NFeReconciliationWorker } from '@modules/NFe/infra/queues/NFeReconciliationWorker';
 import { TypeOrmIntegrationCredentialResolver } from '@modules/NFe/infra/queues/TypeOrmIntegrationCredentialResolver';
+import { NFeDistribuicaoWorker } from '@modules/NFeRecepcao/infra/queues/NFeDistribuicaoWorker';
+import { SefazHealthCheckWorker } from '@modules/SefazHealth/infra/queues/SefazHealthCheckWorker';
 
 /**
  * Entrada do processo de WORKERS. Roda separadamente do servidor HTTP — assim, o
@@ -59,6 +61,12 @@ async function bootstrap(): Promise<void> {
   const certificateExpiryWorker = new CertificateExpiryWorker();
   certificateExpiryWorker.start(workerConnection);
 
+  const distribuicaoWorker = new NFeDistribuicaoWorker();
+  distribuicaoWorker.start(workerConnection);
+
+  const sefazHealthWorker = new SefazHealthCheckWorker();
+  sefazHealthWorker.start(workerConnection);
+
   // Jobs repeatable. jobId fixo evita acumular duplicatas em restarts.
   const nfeQueue = new Queue(QueueName.NFE_DISTRIBUICAO, {
     connection: workerConnection,
@@ -87,12 +95,27 @@ async function bootstrap(): Promise<void> {
     },
   );
 
+  // EP-06c — probe periódico das autorizadoras SEFAZ. Intervalo curto: a indisponibilidade
+  // SEFAZ é o principal driver do auto-roteamento SVC, então quanto mais fresca a leitura
+  // melhor. 5 min é um bom equilíbrio entre frescor e custo (cada sweep gera ~9 SOAP calls
+  // × 2 ambientes = 18 chamadas, todas idempotentes leves).
+  await auditQueue.add(
+    'sefaz-health-sweep',
+    { trigger: 'cron' },
+    {
+      repeat: { every: 5 * 60_000 },
+      jobId: 'sefaz-health-sweep',
+    },
+  );
+
   logger.info('Workers prontos — aguardando jobs');
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'Encerrando workers graciosamente');
     await reconciliationWorker.close();
     await certificateExpiryWorker.close();
+    await distribuicaoWorker.close();
+    await sefazHealthWorker.close();
     await nfeQueue.close();
     await auditQueue.close();
     workerConnection.disconnect();

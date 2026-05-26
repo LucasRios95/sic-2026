@@ -49,4 +49,8 @@ export class InterstateAliquotRepository implements IInterstateAliquotRepository
     const created = this.repo.create(data);
     return this.repo.save(created);
   }
+
+  async listAll(): Promise<InterstateAliquot[]> {
+    return this.repo.find({ order: { ufOrigem: 'ASC', ufDestino: 'ASC' } });
+  }
 }

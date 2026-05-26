@@ -8,14 +8,23 @@ import {
 
 import { useAuthStore } from '@/features/auth/auth-store';
 import { CertificatesPage } from '@/pages/CertificatesPage';
+import { CfopsPage } from '@/pages/CfopsPage';
+import { NcmsPage } from '@/pages/NcmsPage';
+import { CompaniesPage } from '@/pages/CompaniesPage';
 import { CustomersPage } from '@/pages/CustomersPage';
 import { DashboardPage } from '@/pages/DashboardPage';
+import { IcmsStMvaPage } from '@/pages/IcmsStMvaPage';
+import { InboxRecebidosPage } from '@/pages/InboxRecebidosPage';
+import { InterstateAliquotsPage } from '@/pages/InterstateAliquotsPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { NFeDetailsPage } from '@/pages/NFeDetailsPage';
 import { NFeListPage } from '@/pages/NFeListPage';
 import { NFeNewPage } from '@/pages/NFeNewPage';
 import { ProductsPage } from '@/pages/ProductsPage';
+import { ReceivedDocumentDetailsPage } from '@/pages/ReceivedDocumentDetailsPage';
 import { SelectCompanyPage } from '@/pages/SelectCompanyPage';
+import { TaxBenefitsPage } from '@/pages/TaxBenefitsPage';
+import { TaxParametersPage } from '@/pages/TaxParametersPage';
 import { AppLayout } from '@/shared/components/AppLayout';
 
 const GLOBAL_COMPANY_ID = '00000000-0000-0000-0000-000000000000';
@@ -90,6 +99,48 @@ const certificatesRoute = createRoute({
   component: CertificatesPage,
 });
 
+const companiesRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/admin/companies',
+  component: CompaniesPage,
+});
+
+const taxParamsRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/admin/tax-params',
+  component: TaxParametersPage,
+});
+
+const taxInterstateRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/admin/tax-interstate',
+  component: InterstateAliquotsPage,
+});
+
+const taxIcmsStRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/admin/tax-icms-st',
+  component: IcmsStMvaPage,
+});
+
+const taxBenefitsRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/admin/tax-benefits',
+  component: TaxBenefitsPage,
+});
+
+const cfopsRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/admin/cfops',
+  component: CfopsPage,
+});
+
+const ncmsRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/admin/ncms',
+  component: NcmsPage,
+});
+
 const customersRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: '/cadastros/customers',
@@ -120,6 +171,18 @@ const nfeDetailsRoute = createRoute({
   component: NFeDetailsPage,
 });
 
+const inboxRecebidosRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/fiscal/recebidos',
+  component: InboxRecebidosPage,
+});
+
+const receivedDocumentDetailsRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/fiscal/recebidos/$id',
+  component: ReceivedDocumentDetailsPage,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
@@ -127,11 +190,20 @@ const routeTree = rootRoute.addChildren([
   appLayoutRoute.addChildren([
     dashboardRoute,
     certificatesRoute,
+    companiesRoute,
     customersRoute,
     productsRoute,
     nfeListRoute,
     nfeNewRoute,
     nfeDetailsRoute,
+    inboxRecebidosRoute,
+    receivedDocumentDetailsRoute,
+    taxParamsRoute,
+    taxInterstateRoute,
+    taxIcmsStRoute,
+    taxBenefitsRoute,
+    cfopsRoute,
+    ncmsRoute,
   ]),
 ]);
 

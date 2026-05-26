@@ -57,6 +57,8 @@ export interface Product {
   origem: number;
   unidadeComercial: string;
   unidadeTributavel: string;
+  cfopPadraoSaida?: string | null;
+  cfopPadraoEntrada?: string | null;
   active: boolean;
 }
 

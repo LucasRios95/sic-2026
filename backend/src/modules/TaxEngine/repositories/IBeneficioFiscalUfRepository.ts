@@ -8,4 +8,6 @@ export interface IBeneficioFiscalUfRepository {
    */
   findActiveAt(uf: string, ncm: string | null, at: Date): Promise<BeneficioFiscalUf | null>;
   upsert(data: Omit<BeneficioFiscalUf, 'id' | 'createdAt' | 'updatedAt'>): Promise<BeneficioFiscalUf>;
+  /** Lista todos os benefícios cadastrados — usada na UI admin. */
+  listAll(): Promise<BeneficioFiscalUf[]>;
 }

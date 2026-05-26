@@ -39,7 +39,47 @@ export interface NFeIdentificacao {
   codigoNumerico: string;
   /** Indica se a operação é interestadual (preenche idDest). */
   idDest: 1 | 2 | 3; // 1=interna, 2=interestadual, 3=exterior
+
+  /**
+   * Grupo NFref — documentos fiscais referenciados. OBRIGATÓRIO para finalidade
+   * DEVOLUCAO/COMPLEMENTAR/AJUSTE (a SEFAZ rejeita o XML com cStat 526 quando
+   * finNFe ∈ {2,3,4} e não há referência). Aceita múltiplas referências, mas o caso
+   * usual é uma só.
+   */
+  nfeReferenciadas?: NFeReferencia[];
 }
+
+/**
+ * Referência a documento fiscal anterior (grupo NFref do XML). Suporta os 5 tipos
+ * previstos no MOC: refNFe (chave 44 dígitos), refNF (modelo 1/1A — emitidas antes
+ * de 2008), refCTe, refECF, refNFP (Produtor Rural).
+ *
+ * Nesta versão expomos apenas `refNFe` no contrato externo (caso mais comum, ~99%
+ * das devoluções). Os outros tipos ficam disponíveis no domínio para extensão futura
+ * sem mudança de schema do banco.
+ */
+export type NFeReferencia =
+  | { tipo: 'NFE'; chaveAcesso: string }
+  | {
+      tipo: 'NF';
+      cUf: string; // código IBGE da UF emitente (2 dígitos)
+      anoMes: string; // AAMM
+      cnpj: string; // 14 dígitos
+      modelo: string; // 01 ou 1A
+      serie: number;
+      numero: number;
+    }
+  | { tipo: 'CTE'; chaveAcesso: string }
+  | {
+      tipo: 'NFP';
+      cUf: string;
+      anoMes: string;
+      cnpjOuCpf: { kind: 'CNPJ' | 'CPF'; valor: string };
+      ie: string; // ISENTO ou número
+      modelo: string; // 01, 04 ou 1B
+      serie: number;
+      numero: number;
+    };
 
 export interface NFeEmitente {
   cnpj: string; // só dígitos
@@ -209,8 +249,51 @@ export interface NFeTotais {
   valorIs: string;
 }
 
+/**
+ * Bloco `<transp>` da NF-e. `modFrete` é obrigatório; transportadora, veículo e volumes
+ * são opcionais. Códigos modFrete:
+ *   0 = Contratação por conta do remetente (CIF)
+ *   1 = Contratação por conta do destinatário (FOB)
+ *   2 = Contratação por conta de terceiros
+ *   3 = Transporte próprio por conta do remetente
+ *   4 = Transporte próprio por conta do destinatário
+ *   9 = Sem ocorrência de transporte
+ */
 export interface NFeTransporte {
-  modalidadeFrete: 0 | 1 | 2 | 3 | 4 | 9; // 0=remetente, 1=destinatário, 2=terceiros, 3=próprio remet., 4=próprio dest., 9=sem frete
+  modalidadeFrete: 0 | 1 | 2 | 3 | 4 | 9;
+  transportadora?: NFeTransportadora;
+  veiculo?: NFeVeiculo;
+  volumes?: NFeVolume[];
+}
+
+export interface NFeTransportadora {
+  /** PJ → CNPJ (14 dígitos). PF → CPF (11 dígitos). */
+  cnpjCpf?: string | null;
+  /** Razão social ou nome. */
+  nome?: string | null;
+  /** Inscrição estadual da transportadora. */
+  ie?: string | null;
+  /** Endereço completo (logradouro + número + bairro). */
+  endereco?: string | null;
+  municipio?: string | null;
+  uf?: string | null;
+}
+
+export interface NFeVeiculo {
+  /** Placa (Mercosul ABC1D23 ou antiga ABC1234). */
+  placa: string;
+  uf: string;
+  /** Registro Nacional de Transportador de Carga (opcional). */
+  rntc?: string | null;
+}
+
+export interface NFeVolume {
+  quantidade?: number;
+  especie?: string | null;
+  marca?: string | null;
+  numeracao?: string | null;
+  pesoLiquido?: string | null;
+  pesoBruto?: string | null;
 }
 
 export interface NFePagamento {

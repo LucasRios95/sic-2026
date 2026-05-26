@@ -1,0 +1,14 @@
+node_modules
+dist
+coverage
+tmp
+.env
+.env.local
+.env.*.local
+*.log
+.vscode
+.idea
+.git
+.gitignore
+README.md
+tests/__snapshots__

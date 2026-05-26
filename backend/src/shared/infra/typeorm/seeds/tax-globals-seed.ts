@@ -30,6 +30,7 @@ export async function seedTaxGlobals(): Promise<void> {
     logger.info('Seed tax-globals: alíquotas interestaduais (Senado 22/89, 13/2012)');
 
     // Alíquotas interestaduais por par (UF origem, UF destino).
+    // ON CONFLICT DO UPDATE: re-rodar o seed propaga correções sem precisar de migration.
     for (const origem of TODAS_UFS) {
       for (const destino of TODAS_UFS) {
         if (origem === destino) continue;
@@ -38,7 +39,11 @@ export async function seedTaxGlobals(): Promise<void> {
           `INSERT INTO interstate_aliquots
              (id, uf_origem, uf_destino, aliq_nacional, aliq_importado, valid_from, valid_to, fonte_norma, created_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, now(), now())
-           ON CONFLICT (uf_origem, uf_destino, valid_from) DO NOTHING`,
+           ON CONFLICT (uf_origem, uf_destino, valid_from) DO UPDATE SET
+             aliq_nacional = EXCLUDED.aliq_nacional,
+             aliq_importado = EXCLUDED.aliq_importado,
+             fonte_norma = EXCLUDED.fonte_norma,
+             updated_at = now()`,
           [
             uuidv7(),
             origem,
@@ -52,15 +57,19 @@ export async function seedTaxGlobals(): Promise<void> {
       }
     }
 
-    logger.info('Seed tax-globals: alíquotas internas + FCP por UF');
+    logger.info('Seed tax-globals: alíquotas internas + FCP por UF (tabela 2026)');
     for (const uf of TODAS_UFS) {
       const { aliqInterna, aliqFcp } = ALIQ_INTERNA_2026[uf as Uf];
       await manager.query(
         `INSERT INTO icms_interna_uf
            (id, uf, aliq_interna, aliq_fcp, valid_from, valid_to, fonte_norma, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, NULL, $6, now(), now())
-         ON CONFLICT (uf, valid_from) DO NOTHING`,
-        [uuidv7(), uf, aliqInterna, aliqFcp, validFrom2026, 'Legislação estadual vigente em 2026'],
+         ON CONFLICT (uf, valid_from) DO UPDATE SET
+           aliq_interna = EXCLUDED.aliq_interna,
+           aliq_fcp = EXCLUDED.aliq_fcp,
+           fonte_norma = EXCLUDED.fonte_norma,
+           updated_at = now()`,
+        [uuidv7(), uf, aliqInterna, aliqFcp, validFrom2026, 'Tabela ICMS 2026 (NSDocs) + legislação estadual'],
       );
     }
 

@@ -7,6 +7,8 @@ import { authConfig } from '@config/auth';
 import { logger } from '@shared/logger';
 import { appDataSource } from '@shared/infra/typeorm/data-source';
 
+import { seedCfops } from './cfop-seed';
+import { seedNcms } from './ncm-seed';
 import { SYSTEM_PERMISSIONS, SYSTEM_ROLES } from './permissions';
 import { seedTaxGlobals } from './tax-globals-seed';
 
@@ -127,6 +129,12 @@ async function run(): Promise<void> {
 
   // 5) Tabelas globais fiscais (EP-04): alíquotas, FCP, parâmetros da Reforma.
   await seedTaxGlobals();
+
+  // 6) Catálogo de CFOPs (Sinief + RFB PIS/COFINS).
+  await seedCfops();
+
+  // 7) Catálogo de NCMs (CAMEX — hierarquia completa, ~15k entradas).
+  await seedNcms();
 
   await appDataSource.destroy();
   logger.info('Seed concluído com sucesso');

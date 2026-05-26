@@ -6,8 +6,11 @@
  *    quando origem é Sul/Sudeste (exceto ES); 12% nas demais combinações interestaduais.
  *  - Resolução do Senado 13/2012: 4% para mercadorias importadas em qualquer operação
  *    interestadual.
- *  - Alíquotas internas: cada UF instituiu por lei estadual; valores vigentes em 2026.
+ *  - Alíquotas internas: cada UF instituiu por lei estadual; valores vigentes em 2026
+ *    conforme tabela NSDocs 2026 (docs/icms_2026_nsdocs.webp), validada UF a UF.
  *  - FCP: cada UF decide se adota e com qual percentual (0% para UFs que não instituíram).
+ *    A tabela visual NÃO mostra FCP explicitamente — os valores aqui consideram FCP como
+ *    coluna SEPARADA da alíquota interna padrão (a soma efetiva fica a cargo do motor).
  *
  * Esses valores são SEMPRE atualizáveis pelo processo formal de monitoramento normativo,
  * sem precisar de deploy. Esta lista é apenas o estado-zero do sistema.
@@ -70,7 +73,7 @@ export const ALIQ_INTERNA_2026: Record<Uf, { aliqInterna: string; aliqFcp: strin
   RR: { aliqInterna: '20.0000', aliqFcp: null },
   RS: { aliqInterna: '17.0000', aliqFcp: '2.0000' },
   SC: { aliqInterna: '17.0000', aliqFcp: null },
-  SE: { aliqInterna: '19.0000', aliqFcp: '2.0000' },
+  SE: { aliqInterna: '20.0000', aliqFcp: '2.0000' },
   SP: { aliqInterna: '18.0000', aliqFcp: '2.0000' },
   TO: { aliqInterna: '20.0000', aliqFcp: '2.0000' },
 };

@@ -48,6 +48,18 @@ export class CertificateRepository implements ICertificateRepository {
       .getOne();
   }
 
+  async findFirstActive(): Promise<Certificate | null> {
+    return this.repo
+      .createQueryBuilder('c')
+      .where('c.active = true')
+      .andWhere('c.revoked_at IS NULL')
+      .andWhere('c.valid_from <= now()')
+      .andWhere('c.valid_to >= now()')
+      .orderBy('c.valid_to', 'DESC')
+      .limit(1)
+      .getOne();
+  }
+
   async listByCompany(companyId: string): Promise<Certificate[]> {
     return this.repo.find({
       where: { companyId },

@@ -52,6 +52,10 @@ export const productTaxRuleSchema = z.object({
   validTo: z.string().datetime({ offset: true }).optional().nullable(),
 });
 
+const cfopCode = z
+  .string()
+  .regex(/^[123567]\d{3}$/, 'CFOP deve ter 4 dígitos iniciando com 1/2/3/5/6/7');
+
 export const createProductSchema = z.object({
   codigo: z.string().min(1).max(60),
   codigoBarras: z
@@ -65,6 +69,8 @@ export const createProductSchema = z.object({
   origem: z.number().int().min(0).max(8),
   unidadeComercial: z.string().min(1).max(6),
   unidadeTributavel: z.string().min(1).max(6),
+  cfopPadraoSaida: cfopCode.optional().nullable(),
+  cfopPadraoEntrada: cfopCode.optional().nullable(),
   pesoLiquido: decimalString.optional().nullable(),
   pesoBruto: decimalString.optional().nullable(),
   controlaEstoque: z.boolean().optional(),

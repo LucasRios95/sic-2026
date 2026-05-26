@@ -81,6 +81,50 @@ export class NFeXmlBuilder {
     }
     ele.ele('procEmi').txt('0').up(); // 0 = emissão por aplicativo do contribuinte
     ele.ele('verProc').txt('sic-2026/0.1.0').up();
+    // NFref deve ser o ÚLTIMO grupo dentro de <ide> conforme MOC NF-e 7.00.
+    this.appendNFref(ele, doc);
+  }
+
+  /**
+   * Emite o grupo NFref para cada documento fiscal referenciado. Obrigatório quando
+   * finalidade ∈ {COMPLEMENTAR(2), AJUSTE(3), DEVOLUÇÃO(4)} — sem isso a SEFAZ rejeita
+   * com cStat 526.
+   */
+  private appendNFref(parent: XMLBuilder, doc: NFeDocument): void {
+    const refs = doc.identificacao.nfeReferenciadas;
+    if (!refs || refs.length === 0) return;
+    for (const ref of refs) {
+      const nfRef = parent.ele('NFref');
+      switch (ref.tipo) {
+        case 'NFE':
+          nfRef.ele('refNFe').txt(onlyDigits(ref.chaveAcesso)).up();
+          break;
+        case 'CTE':
+          nfRef.ele('refCTe').txt(onlyDigits(ref.chaveAcesso)).up();
+          break;
+        case 'NF': {
+          const g = nfRef.ele('refNF');
+          g.ele('cUF').txt(ref.cUf).up();
+          g.ele('AAMM').txt(ref.anoMes).up();
+          g.ele('CNPJ').txt(onlyDigits(ref.cnpj)).up();
+          g.ele('mod').txt(ref.modelo).up();
+          g.ele('serie').txt(String(ref.serie)).up();
+          g.ele('nNF').txt(String(ref.numero)).up();
+          break;
+        }
+        case 'NFP': {
+          const g = nfRef.ele('refNFP');
+          g.ele('cUF').txt(ref.cUf).up();
+          g.ele('AAMM').txt(ref.anoMes).up();
+          g.ele(ref.cnpjOuCpf.kind).txt(onlyDigits(ref.cnpjOuCpf.valor)).up();
+          g.ele('IE').txt(ref.ie).up();
+          g.ele('mod').txt(ref.modelo).up();
+          g.ele('serie').txt(String(ref.serie)).up();
+          g.ele('nNF').txt(String(ref.numero)).up();
+          break;
+        }
+      }
+    }
   }
 
   private appendEmit(parent: XMLBuilder, doc: NFeDocument): void {
@@ -321,8 +365,46 @@ export class NFeXmlBuilder {
     }
   }
 
+  /**
+   * Bloco `<transp>` — modFrete obrigatório, transportadora/veículo/volumes opcionais.
+   * Ordem dos sub-elementos segue o MOC: modFrete → transporta → veicTransp → vol.
+   */
   private appendTransp(parent: XMLBuilder, doc: NFeDocument): void {
-    parent.ele('transp').ele('modFrete').txt(String(doc.transporte.modalidadeFrete)).up();
+    const t = doc.transporte;
+    const transp = parent.ele('transp');
+    transp.ele('modFrete').txt(String(t.modalidadeFrete)).up();
+
+    if (t.transportadora && hasTransportadoraData(t.transportadora)) {
+      const tr = transp.ele('transporta');
+      if (t.transportadora.cnpjCpf) {
+        const digits = onlyDigits(t.transportadora.cnpjCpf);
+        tr.ele(digits.length === 14 ? 'CNPJ' : 'CPF').txt(digits).up();
+      }
+      if (t.transportadora.ie) tr.ele('IE').txt(t.transportadora.ie).up();
+      if (t.transportadora.nome) tr.ele('xNome').txt(t.transportadora.nome).up();
+      if (t.transportadora.endereco) tr.ele('xEnder').txt(t.transportadora.endereco).up();
+      if (t.transportadora.municipio) tr.ele('xMun').txt(t.transportadora.municipio).up();
+      if (t.transportadora.uf) tr.ele('UF').txt(t.transportadora.uf).up();
+    }
+
+    if (t.veiculo) {
+      const v = transp.ele('veicTransp');
+      v.ele('placa').txt(t.veiculo.placa.replace(/[^A-Z0-9]/gi, '').toUpperCase()).up();
+      v.ele('UF').txt(t.veiculo.uf).up();
+      if (t.veiculo.rntc) v.ele('RNTC').txt(t.veiculo.rntc).up();
+    }
+
+    if (t.volumes && t.volumes.length > 0) {
+      for (const vol of t.volumes) {
+        const v = transp.ele('vol');
+        if (vol.quantidade !== undefined) v.ele('qVol').txt(String(vol.quantidade)).up();
+        if (vol.especie) v.ele('esp').txt(vol.especie).up();
+        if (vol.marca) v.ele('marca').txt(vol.marca).up();
+        if (vol.numeracao) v.ele('nVol').txt(vol.numeracao).up();
+        if (vol.pesoLiquido) v.ele('pesoL').txt(vol.pesoLiquido).up();
+        if (vol.pesoBruto) v.ele('pesoB').txt(vol.pesoBruto).up();
+      }
+    }
   }
 
   private appendPag(parent: XMLBuilder, doc: NFeDocument): void {
@@ -389,4 +471,8 @@ function cofinsGroupName(cst: string): string {
   if (cst === '03') return 'COFINSQtde';
   if (['04', '05', '06', '07', '08', '09'].includes(cst)) return 'COFINSNT';
   return 'COFINSOutr';
+}
+
+function hasTransportadoraData(t: NonNullable<NFeDocument['transporte']['transportadora']>): boolean {
+  return Boolean(t.cnpjCpf || t.nome || t.ie || t.endereco || t.municipio || t.uf);
 }

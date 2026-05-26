@@ -1,0 +1,24 @@
+# Imagem de desenvolvimento — Vite dev server com HMR.
+#
+# Em produção, troque por multi-stage build: build estático + nginx servindo dist/.
+# Esta imagem prioriza DX: instala devDependencies, roda `vite` direto do source
+# montado via bind mount no compose.
+
+FROM node:22-alpine
+
+RUN apk add --no-cache dumb-init
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+COPY . .
+
+EXPOSE 5173
+
+# `--host 0.0.0.0` no compose force binding em todas as interfaces — sem isso, o
+# Vite escuta só em 127.0.0.1 dentro do container e a porta exposta não funciona.
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

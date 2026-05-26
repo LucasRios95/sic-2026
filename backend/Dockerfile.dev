@@ -1,0 +1,36 @@
+# Imagem de desenvolvimento — usa `tsx watch` para hot-reload.
+#
+# Em produção, troque por multi-stage build (npm run build → node dist/...).
+# Esta imagem prioriza tempo de iteração: instala devDependencies, mantém o tsx,
+# e roda direto do source montado via bind mount no compose.
+
+FROM node:22-alpine
+
+# Pacotes runtime necessários:
+#  - python3 / make / g++ : alguns deps nativos (bcryptjs fallback, node-forge — ambos puros,
+#    mas mantém disponível para qualquer dep transitivo que precise).
+#  - dumb-init: PID 1 sano (encerra graceful em SIGTERM, propaga sinais).
+RUN apk add --no-cache dumb-init python3 make g++
+
+WORKDIR /app
+
+# Copia manifests primeiro — assim, mudanças só em src/ não invalidam a camada
+# do `npm install` (build cache eficiente).
+COPY package.json package-lock.json* ./
+
+# `npm ci` quando há lockfile; fallback para `npm install` caso lockfile ausente.
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+# Copia o restante do projeto. No compose, isso é sobrescrito pelo bind mount —
+# mas mantém a imagem auto-suficiente quando rodada fora do compose.
+COPY . .
+
+# Cria pastas de runtime que algumas variáveis (VAULT_PATH, STORAGE_PATH) esperam.
+RUN mkdir -p /app/tmp/vault /app/tmp/docs
+
+EXPOSE 3333
+
+# dumb-init garante que SIGTERM/SIGINT chegam ao processo Node — sem isso, o tsx
+# watch fica zombie em `docker stop`.
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["npm", "run", "dev"]

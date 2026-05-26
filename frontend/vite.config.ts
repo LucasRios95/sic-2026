@@ -13,5 +13,13 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    // Quando rodando no Docker, o Vite precisa escutar em 0.0.0.0 para a porta
+    // exposta funcionar. HMR via polling como fallback caso o file watcher do
+    // host não propague para o container (Docker Desktop no Windows/Mac).
+    host: true,
+    watch: {
+      usePolling: true,
+      interval: 500,
+    },
   },
 });

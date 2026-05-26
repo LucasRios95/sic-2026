@@ -1,6 +1,7 @@
 import { inject, injectable } from 'tsyringe';
 
 import { ICompanyRepository } from '@modules/Companies/repositories/ICompanyRepository';
+import { INcmRepository } from '@modules/Ncm/repositories/INcmRepository';
 import { BusinessRuleError, NotFoundError, ValidationError } from '@shared/errors';
 
 import { ICreateProductDTO } from '../../dtos/ProductDTOs';
@@ -19,6 +20,9 @@ export class CreateProductUseCase {
 
     @inject('CompanyRepository')
     private readonly companyRepository: ICompanyRepository,
+
+    @inject('NcmRepository')
+    private readonly ncmRepository: INcmRepository,
   ) {}
 
   /**
@@ -34,6 +38,30 @@ export class CreateProductUseCase {
     if (!/^\d{8}$/.test(data.ncm)) {
       throw new ValidationError('NCM deve ter 8 dígitos numéricos', { field: 'ncm' });
     }
+
+    // Valida contra o catálogo CAMEX: aceita só NCMs de 8 dígitos vigentes.
+    // Catálogo populado via `npm run seed` (15k+ entradas). Quando o seed não rodou em
+    // ambiente novo, o lookup retorna null e o erro orienta o operador.
+    const ncmRecord = await this.ncmRepository.findByCodigo(data.ncm);
+    if (!ncmRecord) {
+      throw new ValidationError(
+        `NCM ${data.ncm} não consta no catálogo CAMEX. Verifique o código ou rode o seed do catálogo NCM.`,
+        { field: 'ncm' },
+      );
+    }
+    if (!ncmRecord.validoParaNfe) {
+      throw new ValidationError(
+        `NCM ${data.ncm} é nó hierárquico (capítulo/posição), não válido em NF-e. Use o código completo de 8 dígitos.`,
+        { field: 'ncm' },
+      );
+    }
+    if (!ncmRecord.ativo) {
+      throw new ValidationError(
+        `NCM ${data.ncm} está revogado no catálogo CAMEX (${ncmRecord.ato ?? 'sem fonte'}).`,
+        { field: 'ncm' },
+      );
+    }
+
     if (data.cest && !/^\d{7}$/.test(data.cest)) {
       throw new ValidationError('CEST deve ter 7 dígitos numéricos', { field: 'cest' });
     }

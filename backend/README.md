@@ -3,11 +3,14 @@
 > Substituição do legado Delphi/BDE/Paradox por uma plataforma fiscal-financeira web
 > preparada para a Reforma Tributária (NF-e modelo 55 direto SEFAZ + NFS-e via Focus NF-e,
 > IBS/CBS/IS, multiempresa, RBAC). Esta entrega cobre **Fase 0 (EP-01 a EP-05) + Fase 1a
-> (EP-06, EP-06b, EP-07, EP-07b, EP-08)** do Plano de Desenvolvimento v1.0 — fundação
-> técnica, motor tributário, ciclo de vida COMPLETO da NF-e (emissão, cancelamento, CC-e,
-> Inutilização, reconciliação automática), custódia produtiva de certificados A1 e
-> **DANFE em React-PDF + storage com URLs assinadas + envio automático por e-mail**
-> (XML + DANFE) para o destinatário.
+> completa (EP-06, EP-06b, EP-06c, EP-07, EP-07b, EP-08) + Fase 1b parcial (EP-10 + EP-11)**
+> do Plano de Desenvolvimento v1.0 — fundação técnica, motor tributário, ciclo de vida
+> COMPLETO da NF-e (emissão, cancelamento, CC-e, Inutilização, reconciliação automática,
+> **EPEC manual + auto-roteamento SVC**), custódia produtiva de certificados A1, **monitor
+> de saúde SEFAZ por autorizadora**, **DANFE em React-PDF + storage com URLs assinadas +
+> envio automático por e-mail** (XML + DANFE) para o destinatário, **Distribuição DF-e da
+> SEFAZ** (inbox de notas recebidas contra o CNPJ) e **Manifestação do Destinatário**
+> (Ciência, Confirmação, Desconhecimento, Operação não Realizada).
 
 ## Stack
 
@@ -44,6 +47,10 @@ src/
 │   │   ├── domain/               — ContextoCalculo, ResultadoCalculo, interfaces
 │   │   ├── infra/typeorm/        — Interstate/IcmsInterna/IcmsStMva/Beneficio/TaxParameter
 │   │   └── MotorTributario.ts    — pipeline orquestrador
+│   ├── NFe/                      — emissão NF-e modelo 55 (EP-06/07) + EPEC (EP-06c)
+│   ├── NFeRecepcao/              — Distribuição DF-e + Manifestação destinatário (EP-10/11)
+│   ├── SefazHealth/              — monitor de saúde por autorizadora + auto-SVC (EP-06c)
+│   ├── Certificates/             — custódia A1 + alerta de expiração (EP-06b)
 │   ├── Auditoria/                — AuditLog append-only + AuditService (EP-05)
 │   └── Notifications/            — inbox por usuário/empresa (EP-05)
 └── shared/
@@ -73,12 +80,27 @@ Cada módulo segue o padrão `{dtos, infra/{typeorm/{entities,repositories}, htt
 
 ## Setup
 
+### Opção A — Tudo em Docker (recomendado)
+
+Da raiz do repo (`sic-2026/`):
+
+```powershell
+docker compose up -d
+```
+
+Sobe `postgres`, `redis`, roda `migrate` (migrations + seed), e mantém `backend`,
+`worker` e `frontend` com hot-reload. Detalhes completos em
+[`../README.md`](../README.md).
+
+### Opção B — Rodar localmente (sem Docker para a aplicação)
+
 ```powershell
 # 1. Instalar dependências
 npm install
 
-# 2. Subir Postgres e Redis locais
-docker compose up -d
+# 2. Subir Postgres e Redis locais (qualquer instalação serve — Docker, brew, apt, ou managed)
+#    Se quiser usar só a infra do Docker:
+#    docker compose -f ../docker-compose.yml up -d postgres redis
 
 # 3. Copiar variáveis de ambiente
 cp .env.example .env  # ajuste valores conforme necessário (JWT_SECRET é obrigatório)
@@ -89,8 +111,9 @@ npm run migration:run
 # 5. Rodar seed (cria permissões, papéis padrão e admin@sic.local / Admin@123)
 npm run seed
 
-# 6. Subir a aplicação em modo dev
-npm run dev
+# 6. Subir a aplicação em modo dev (API + worker em terminais separados)
+npm run dev      # Terminal 1 — API HTTP
+npm run worker   # Terminal 2 — workers BullMQ
 ```
 
 A API responde em `http://localhost:3333`. Health check: `GET /health`.
@@ -132,10 +155,16 @@ A API responde em `http://localhost:3333`. Health check: `GET /health`.
 | `POST` | `/nfe` | JWT + `nfe.emit` ou `admin.full` + `X-Company-Id` | **Emite NF-e end-to-end** (idempotência + numeração atômica + motor tributário + composição XML + assinatura + transmissão SEFAZ + persistência). |
 | `POST` | `/nfe/:id/cancel` | JWT + `nfe.cancel` ou `admin.full` + `X-Company-Id` | Cancela NF-e dentro do prazo legal (24h). Justificativa mínima 15 chars. |
 | `POST` | `/nfe/:id/cce` | JWT + `nfe.cce` ou `admin.full` + `X-Company-Id` | Emite Carta de Correção Eletrônica (até 20 por NF-e, vale a última). Texto 15-1000 chars. |
+| `POST` | `/nfe/:id/epec` | JWT + `nfe.contingencia.epec` ou `admin.full` + `X-Company-Id` | Emite EPEC (contingência) para NF-e em PENDING/PROCESSING. Bloqueado quando SEFAZ normal OU SVC estão UP — só legítimo com ambos DOWN. |
 | `POST` | `/nfe/inutilizar` | JWT + `nfe.cancel` ou `admin.full` + `X-Company-Id` | Inutiliza faixa de numeração NÃO usada (apenas números virgens). |
+| `GET` | `/sefaz-health` | JWT + `nfe.read` ou `nfe.emit` ou `admin.full` | Estado conhecido de cada autorizadora SEFAZ (SP, RS, MG, BA, AM, SVRS, SVAN, SVC-AN, SVC-RS) por ambiente — UP/DEGRADED/DOWN/UNKNOWN. |
+| `POST` | `/sefaz-health/probe` | JWT + `admin.full` | Dispara probe manual contra todas as autorizadoras. Síncrono (~10-30s). |
 | `GET` | `/certificates` | JWT + `vault.read` ou `vault.write` ou `admin.full` + `X-Company-Id` | Lista certificados da empresa (metadata, sem vaultRef). |
 | `POST` | `/certificates` | JWT + `vault.write` ou `admin.full` + `X-Company-Id` | Upload de PFX (base64) + senha. Valida CNPJ titular, expiração, duplicidade. |
 | `DELETE` | `/certificates/:id` | JWT + `vault.write` ou `admin.full` + `X-Company-Id` | Revoga certificado (marca inativo + remove do cofre). |
+| `GET` | `/fiscal/recebidos` | JWT + `nfe.read` ou `entrada.manifest` + `X-Company-Id` | Inbox de DF-e recebidos contra o CNPJ (status, emitente, janela). |
+| `POST` | `/fiscal/recebidos/sync` | JWT + `entrada.manifest` ou `admin.full` + `X-Company-Id` | Disparo manual da sincronização `nfeDistribuicaoDFe` (avança o cursor NSU da empresa). |
+| `POST` | `/fiscal/recebidos/:id/manifest` | JWT + `entrada.manifest` ou `admin.full` + `X-Company-Id` | Manifesta destinatário (CIENCIA/CONFIRMACAO/DESCONHECIMENTO/OPERACAO_NAO_REALIZADA). |
 
 ### Modelo de envelope HTTP
 
@@ -375,17 +404,26 @@ npm run seed              # popular permissões/papéis/admin
 
 ## Próximas fases (Plano de Desenvolvimento)
 
-A fundação implementada nesta entrega habilita o restante da **Fase 1a** do Plano:
+A fundação implementada nesta entrega cobre toda a **Fase 1a** + parte da **Fase 1b** do
+Plano:
 
 - ✅ **EP-06** — Cliente SOAP SEFAZ + assinatura XML-DSig + roteamento por UF.
 - ✅ **EP-06b** — Custódia de certificado A1: upload com inspeção, resolver por banco,
   alerta de expiração 60/30/7 dias.
 - ✅ **EP-07** — `EmitirNFe` end-to-end + cancelamento + idempotência + numeração atômica.
 - ✅ **EP-07b** — Worker de reconciliação, CC-e (até 20 por NF-e), Inutilização.
-  Pendências: eventos Ator Interessado/Insucesso na Entrega (TSK-114), contingência EPEC
-  (TSK-115).
-- **EP-08** — DANFE em PDF (React-PDF) + envio por email + object storage.
-- **EP-09** — Frontend de emissão de NF-e (consome `POST /tax/simulate` para preview).
+  Pendências: eventos Ator Interessado/Insucesso na Entrega (TSK-114).
+- ✅ **EP-06c** — Monitor de saúde SEFAZ por autorizadora (cron 5min) + auto-roteamento
+  SVC + contingência EPEC manual. Pendência: worker de reprocessamento das NFes EPEC
+  quando SEFAZ normal volta (parte do TSK-115).
+- ✅ **EP-08** — DANFE em PDF (React-PDF) + envio por email + object storage.
+- ✅ **EP-09** — Frontend de emissão de NF-e (consome `POST /tax/simulate` para preview).
+- ✅ **EP-10** — Distribuição DF-e (`nfeDistribuicaoDFe`): inbox de notas recebidas
+  contra o CNPJ + cursor NSU + worker periódico.
+- ✅ **EP-11** — Manifestação do Destinatário (Ciência, Confirmação, Desconhecimento,
+  Operação não Realizada).
+- **EP-06c** — Contingência EPEC + monitor de saúde SEFAZ por UF (próximo).
+- **EP-12 / EP-13 / EP-14** — Importação manual XML/PDF, Focus NF-e, NFS-e nacional+municipal.
 
 Calculadora de Imposto Seletivo (IS) com vigência 2027+ e calculadora de ISS +
 retenções federais para serviços entram junto com a Fase 1b (NFS-e via Focus NF-e).
@@ -579,6 +617,175 @@ em três faixas:
 no banco e tenta remover o conteúdo do cofre. Se o cofre estiver indisponível, o banco
 permanece revogado (cofre vira limpeza assíncrona). Exige permissão `vault.write` ou
 `admin.full`.
+
+## Saúde SEFAZ + Contingência (EP-06c)
+
+### Monitor de saúde por autorizadora
+
+Tabela [`sefaz_health_status`](src/modules/SefazHealth/infra/typeorm/entities/SefazHealthStatus.ts)
+mantém o estado conhecido de cada par (autorizadora, ambiente). Estados:
+
+| Estado | Significado | Ação do `EmitirNFeUseCase` |
+| --- | --- | --- |
+| `UP` | Última probe retornou cStat 107 < 5s | Rota normal |
+| `DEGRADED` | cStat 107 com latência ≥ 5s, ou 1-2 falhas leves | Rota normal (com alerta no log) |
+| `DOWN` | 3 falhas consecutivas OU cStat 108/109/999 | **Auto-roteamento SVC** |
+| `UNKNOWN` | Autorizadora ainda não probada (boot) | Rota normal (fail-open) |
+
+**Histerese** evita flapping:
+- Transição para `DOWN`: 3 falhas consecutivas (`CONSECUTIVE_FAILURES_TO_DOWN`).
+- Retorno para `UP`: 2 sucessos consecutivos (`CONSECUTIVE_SUCCESSES_TO_UP`).
+- Latência mantém média móvel suavizada (`0.7 × histórico + 0.3 × atual`) — boa o
+  bastante para o dashboard sem precisar de janela deslizante.
+
+### Worker periódico
+
+[`SefazHealthCheckWorker`](src/modules/SefazHealth/infra/queues/SefazHealthCheckWorker.ts)
+roda na fila `audit-async` com `jobId: sefaz-health-sweep`, repeat a cada **5 minutos**.
+
+Cada sweep:
+1. Resolve o primeiro certificado A1 ativo cross-tenant (`Certificate.findFirstActive()`).
+2. Para cada ambiente (HOMOLOGACAO + PRODUCAO), chama `monitor.probeAll()`.
+3. `probeAll` itera as 9 autorizadoras conhecidas (SP, RS, MG, BA, AM, SVRS, SVAN, SVC-AN,
+   SVC-RS) e dispara `NFeStatusServico4` contra cada uma.
+4. Estado da máquina é aplicado e persistido por par (autorizadora, ambiente).
+
+Quando não há certificado A1 cadastrado (instalação nova), o sweep é pulado com info-log
+e tenta de novo na próxima rodada.
+
+### Auto-roteamento SVC
+
+Antes de transmitir, `EmitirNFeUseCase.decideFormaEmissao(uf, ambiente)`:
+
+1. Pega a autorizadora normal da UF via `SefazEndpoints.autorizadoraDeUf(uf)`.
+2. Lê o estado via `SefazHealthMonitorService.getState(autorizadora, ambiente)`.
+3. Estado ≠ DOWN → `formaEmissao = NORMAL`, `tpEmis = 1`.
+4. Estado = DOWN → verifica SVC apropriada (`SVC-AN` para SP/RJ/ES/MG/BA/GO/PR; `SVC-RS`
+   para demais). Se SVC também DOWN → lança `SEFAZ_AND_SVC_DOWN` (operador deve usar EPEC).
+5. SVC disponível → `formaEmissao = CONTINGENCIA_SVC_AN/RS`, `tpEmis = 6 ou 7`. A chave
+   de acesso carrega o `tpEmis` no dígito 35 — recálculo do DV é automático.
+6. `SefazSoapClient` recebe `contingenciaSvc: true` e usa as URLs SVC.
+
+### Contingência EPEC
+
+Quando ambos canais (normal + SVC) estão fora, o operador pode acionar manualmente:
+
+```http
+POST /nfe/:id/epec
+Body: { "certificateVaultRef": "vault://cert/abc" }
+```
+
+Pré-condições verificadas pelo [`EmitirEpecUseCase`](src/modules/NFe/useCases/EmitirEpec/EmitirEpecUseCase.ts):
+- NF-e em status PENDING ou PROCESSING (não autorizada ainda).
+- NF-e com `chaveAcesso` e `customerId` cadastrados.
+- **Ambos canais (normal + SVC) em DOWN** — protege contra uso indevido de contingência
+  quando há canal disponível (mensagem `EPEC_NOT_NEEDED`).
+
+Pipeline:
+1. [`EpecXmlBuilder`](src/modules/NFe/domain/EpecXmlBuilder.ts) compõe evento 110140
+   (cOrgao=91, ambiente nacional, com resumo da nota: emitente, destinatário, vNF, vICMS, vST).
+2. Assina via `NFeSigner`.
+3. Transmite ao **ambiente nacional** (SVRS hospeda o serviço de eventos via
+   `NFeRecepcaoEvento4`).
+4. cStat 135/136 → NF-e migra para AUTHORIZED com `formaEmissao = CONTINGENCIA_EPEC` +
+   protocolo do evento.
+5. DANFE deve mostrar tarja "EMITIDO EM CONTINGÊNCIA EPEC" (tarja já contemplada no
+   [`DanfeDocument`](src/modules/NFe/infra/danfe/DanfeDocument.tsx) — exibida quando
+   `formaEmissao !== NORMAL`).
+6. Auditoria + notificação warn na inbox.
+
+**Reprocessamento pós-contingência (TSK-115 — pendência reconhecida).** O worker que
+promove NF-e EPEC para autorização definitiva quando SEFAZ normal volta NÃO foi
+implementado nesta entrega. Operação atual: o operador retransmite manualmente via
+re-emissão (com `formaEmissao = CONTINGENCIA_EPEC` mantido para preservar o tpEmis).
+Próxima iteração entrega o sweep automático.
+
+### Endpoint para diagnóstico
+
+`GET /sefaz-health` devolve a lista completa:
+
+```json
+{
+  "data": [
+    {
+      "autorizadora": "SP",
+      "ambiente": "PRODUCAO",
+      "state": "UP",
+      "stateSince": "2026-05-25T06:00:00Z",
+      "lastCheckAt": "2026-05-25T06:25:12Z",
+      "lastCStat": "107",
+      "meanLatencyMs": 820,
+      "consecutiveFailures": 0,
+      "consecutiveSuccesses": 18
+    },
+    { "autorizadora": "AM", "ambiente": "PRODUCAO", "state": "DOWN", ... }
+  ]
+}
+```
+
+Frontend admin consome para mostrar dashboard verde/amarelo/vermelho por UF e
+permite probe manual quando faturista relata "SEFAZ fora".
+
+## Distribuição DF-e + Manifestação do Destinatário (EP-10 + EP-11)
+
+### Pipeline de sincronização
+
+A cada disparo (cron a cada 15-30 min em produção, ou `POST /fiscal/recebidos/sync` sob
+demanda), o [`SincronizarRecebidosUseCase`](src/modules/NFeRecepcao/useCases/SincronizarRecebidos/SincronizarRecebidosUseCase.ts):
+
+1. Carrega o cursor NSU da empresa (`nsu_cursors.cursor_value`, default `0`).
+2. Chama o web service `NFeDistribuicaoDFe` (ambiente nacional, cUFAutor 91) com o
+   último NSU consumido — via [`NFeDistribuicaoDFeService`](src/modules/NFeRecepcao/infra/sefaz/NFeDistribuicaoDFeService.ts).
+3. Decodifica cada `docZip` retornado (`base64` → `gunzip` → XML — ver
+   [`decodeDocZip`](src/modules/NFeRecepcao/infra/sefaz/sefazPayload.ts)).
+4. Para schemas `resNFe`: faz upsert em `received_documents` (idempotente por
+   `(companyId, chave_acesso)`). Outros schemas (`procNFe`, `resEvento`, CT-e, MDF-e)
+   são logados e ignorados nesta versão — entram em iteração futura.
+5. Avança o cursor para o `maxNSU` retornado. cStat 138 ("sem novidades") termina o laço.
+6. Repete até esgotar (`maxNSU === ultNSU`) ou bater `maxIterations` (default 10).
+7. Notifica a inbox quando há novos documentos.
+
+| Aspecto | Implementação |
+| --- | --- |
+| Cursor por empresa | Tabela `nsu_cursors` (companyId, origem, cursorValue, lastFetchedAt, lastCStat) |
+| Idempotência | `upsertByChave` — re-execução com mesmo cursor não duplica |
+| Falha individual | `try/catch` por documento; cursor avança mesmo se 1 docZip falhar |
+| Cursor inicial 0 | Trás backlog histórico (SEFAZ guarda DF-e por **3 anos**) |
+| Limite por chamada | 50 docZip por resposta (limite SEFAZ); use case continua paginando |
+
+### Manifestação do destinatário
+
+`POST /fiscal/recebidos/:id/manifest` aciona o [`ManifestarDestinatarioUseCase`](src/modules/NFeRecepcao/useCases/ManifestarDestinatario/ManifestarDestinatarioUseCase.ts).
+Tipos suportados:
+
+| Tipo | `tpEvento` | `xJust` exigida? | Habilita download do XML completo? |
+| --- | --- | --- | --- |
+| `CIENCIA_OPERACAO` | 210210 | Não (proibida) | Não |
+| `CONFIRMACAO_OPERACAO` | 210200 | Não (proibida) | **Sim** (libera `procNFe` via DF-e) |
+| `DESCONHECIMENTO_OPERACAO` | 210220 | Sim (≥ 15 chars) | Não |
+| `OPERACAO_NAO_REALIZADA` | 210240 | Sim (≥ 15 chars) | Não |
+
+Fluxo: builder do XML 1.00 → assinatura XML-DSig (mesmo `NFeSigner`) → envelope
+`envEvento` → SOAP `NFeRecepcaoEvento4` → persistência em `dfe_manifestations` com cStat
+135/136 (aceito) ou demais (rejeitado) → notificação à inbox + auditoria.
+
+Após `CONFIRMACAO_OPERACAO` aceita, a resposta carrega `triggeredDownload: true` — sinal
+para que um job futuro busque o XML completo via novo `nfeDistribuicaoDFe` (entra em
+iteração subsequente; nesta versão, o operador pode chamar `POST /fiscal/recebidos/sync`
+manualmente).
+
+### Worker
+
+[`NFeDistribuicaoWorker`](src/modules/NFeRecepcao/infra/queues/NFeDistribuicaoWorker.ts)
+escuta a fila `nfe-distribuicao` (compartilhada com a reconciliação NF-e; separados por
+`job.name`). Aceita dois nomes de job:
+
+- `nfe-recepcao-sync` — payload `{ companyId, maxIterations? }` para sincronizar uma
+  única empresa (uso pelo endpoint `/sync`).
+- `nfe-recepcao-sync-sweep` — payload `{ companyIds: string[] }` para sincronizar várias
+  empresas em sequência (uso por scheduler externo ou futuro `companies.listActiveCrossTenant()`).
+
+Política de erro: falha numa empresa NÃO derruba o job — segue processando as demais.
 
 ### Pendências reconhecidas (registradas para fases seguintes)
 

@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { RouterProvider } from '@tanstack/react-router';
+import { Toaster } from 'sonner';
 
 import { router } from './routes';
 
@@ -18,6 +19,16 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
+      <Toaster
+        position="top-right"
+        richColors
+        closeButton
+        toastOptions={{
+          classNames: {
+            toast: 'font-sans',
+          },
+        }}
+      />
       <ReactQueryDevtools initialIsOpen={false} />
     </QueryClientProvider>
   );

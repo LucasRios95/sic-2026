@@ -6,13 +6,19 @@ import { IRoleRepository } from '@modules/AccessControl/repositories/IRoleReposi
 import { IUserRoleRepository } from '@modules/AccessControl/repositories/IUserRoleRepository';
 import { IAuditLogRepository } from '@modules/Auditoria/repositories/IAuditLogRepository';
 import { ICertificateRepository } from '@modules/Certificates/repositories/ICertificateRepository';
+import { ICfopRepository } from '@modules/Cfop/repositories/ICfopRepository';
+import { INcmRepository } from '@modules/Ncm/repositories/INcmRepository';
 import { ICompanyRepository } from '@modules/Companies/repositories/ICompanyRepository';
 import { ICustomerRepository } from '@modules/Customers/repositories/ICustomerRepository';
 import { INFeEventoRepository } from '@modules/NFe/repositories/INFeEventoRepository';
 import { INFeRepository } from '@modules/NFe/repositories/INFeRepository';
 import { INumberingSeriesRepository } from '@modules/NFe/repositories/INumberingSeriesRepository';
 import { ISefazTransmissionRepository } from '@modules/NFe/repositories/ISefazTransmissionRepository';
+import { IDfeManifestationRepository } from '@modules/NFeRecepcao/repositories/IDfeManifestationRepository';
+import { INsuCursorRepository } from '@modules/NFeRecepcao/repositories/INsuCursorRepository';
+import { IReceivedDocumentRepository } from '@modules/NFeRecepcao/repositories/IReceivedDocumentRepository';
 import { INotificationRepository } from '@modules/Notifications/repositories/INotificationRepository';
+import { ISefazHealthStatusRepository } from '@modules/SefazHealth/repositories/ISefazHealthStatusRepository';
 import { IProductRepository } from '@modules/Products/repositories/IProductRepository';
 import { IProductTaxRuleRepository } from '@modules/Products/repositories/IProductTaxRuleRepository';
 import { IServiceRepository } from '@modules/Services/repositories/IServiceRepository';
@@ -33,13 +39,19 @@ import { RoleRepository } from '@modules/AccessControl/infra/typeorm/repositorie
 import { UserRoleRepository } from '@modules/AccessControl/infra/typeorm/repositories/UserRoleRepository';
 import { AuditLogRepository } from '@modules/Auditoria/infra/typeorm/repositories/AuditLogRepository';
 import { CertificateRepository } from '@modules/Certificates/infra/typeorm/repositories/CertificateRepository';
+import { CfopRepository } from '@modules/Cfop/infra/typeorm/repositories/CfopRepository';
+import { NcmRepository } from '@modules/Ncm/infra/typeorm/repositories/NcmRepository';
 import { CompanyRepository } from '@modules/Companies/infra/typeorm/repositories/CompanyRepository';
 import { CustomerRepository } from '@modules/Customers/infra/typeorm/repositories/CustomerRepository';
 import { NFeEventoRepository } from '@modules/NFe/infra/typeorm/repositories/NFeEventoRepository';
 import { NFeRepository } from '@modules/NFe/infra/typeorm/repositories/NFeRepository';
 import { NumberingSeriesRepository } from '@modules/NFe/infra/typeorm/repositories/NumberingSeriesRepository';
 import { SefazTransmissionRepository } from '@modules/NFe/infra/typeorm/repositories/SefazTransmissionRepository';
+import { DfeManifestationRepository } from '@modules/NFeRecepcao/infra/typeorm/repositories/DfeManifestationRepository';
+import { NsuCursorRepository } from '@modules/NFeRecepcao/infra/typeorm/repositories/NsuCursorRepository';
+import { ReceivedDocumentRepository } from '@modules/NFeRecepcao/infra/typeorm/repositories/ReceivedDocumentRepository';
 import { NotificationRepository } from '@modules/Notifications/infra/typeorm/repositories/NotificationRepository';
+import { SefazHealthStatusRepository } from '@modules/SefazHealth/infra/typeorm/repositories/SefazHealthStatusRepository';
 import { ProductRepository } from '@modules/Products/infra/typeorm/repositories/ProductRepository';
 import { ProductTaxRuleRepository } from '@modules/Products/infra/typeorm/repositories/ProductTaxRuleRepository';
 import { ServiceRepository } from '@modules/Services/infra/typeorm/repositories/ServiceRepository';
@@ -139,6 +151,12 @@ export function registerDependencies(): void {
     CertificateRepository,
   );
 
+  // --- Catálogo CFOP ---
+  container.registerSingleton<ICfopRepository>('CfopRepository', CfopRepository);
+
+  // --- Catálogo NCM (CAMEX) ---
+  container.registerSingleton<INcmRepository>('NcmRepository', NcmRepository);
+
   // --- NF-e (Fase 1a — EP-06 + EP-07) ---
   container.registerSingleton<ISefazTransmissionRepository>(
     'SefazTransmissionRepository',
@@ -149,6 +167,23 @@ export function registerDependencies(): void {
   container.registerSingleton<INumberingSeriesRepository>(
     'NumberingSeriesRepository',
     NumberingSeriesRepository,
+  );
+
+  // --- NF-e Recepção (Fase 1b — EP-10 + EP-11) ---
+  container.registerSingleton<INsuCursorRepository>('NsuCursorRepository', NsuCursorRepository);
+  container.registerSingleton<IReceivedDocumentRepository>(
+    'ReceivedDocumentRepository',
+    ReceivedDocumentRepository,
+  );
+  container.registerSingleton<IDfeManifestationRepository>(
+    'DfeManifestationRepository',
+    DfeManifestationRepository,
+  );
+
+  // --- Saúde SEFAZ (EP-06c) ---
+  container.registerSingleton<ISefazHealthStatusRepository>(
+    'SefazHealthStatusRepository',
+    SefazHealthStatusRepository,
   );
 
   // --- Providers ---

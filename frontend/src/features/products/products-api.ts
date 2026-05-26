@@ -43,12 +43,18 @@ export async function listProducts(filter: ListProductsFilter = {}): Promise<{
 
 export interface CreateProductPayload {
   codigo: string;
+  codigoBarras?: string | null;
   descricao: string;
   ncm: string;
-  cest?: string;
+  cest?: string | null;
   origem: number;
   unidadeComercial: string;
   unidadeTributavel: string;
+  cfopPadraoSaida?: string | null;
+  cfopPadraoEntrada?: string | null;
+  pesoLiquido?: string | null;
+  pesoBruto?: string | null;
+  controlaEstoque?: boolean;
   initialTaxRule?: {
     aliqIcms?: string;
     cstIcms?: string;

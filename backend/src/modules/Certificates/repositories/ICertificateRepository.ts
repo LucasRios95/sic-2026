@@ -21,6 +21,12 @@ export interface ICertificateRepository {
   findByThumbprint(thumbprint: string): Promise<Certificate | null>;
   /** Retorna o certificado ativo com `valid_to` mais distante. Usado pelo resolver. */
   findActiveForCompany(companyId: string): Promise<Certificate | null>;
+  /**
+   * Cross-tenant: retorna QUALQUER certificado ativo (preferindo o mais distante de
+   * expirar). Usado pelo `SefazHealthCheckWorker` para escolher uma identidade de
+   * probe — a chamada `NFeStatusServico4` é leitura e não exige relação com o titular.
+   */
+  findFirstActive(): Promise<Certificate | null>;
   /** Lista todos (ativos e revogados) — para tela admin. */
   listByCompany(companyId: string): Promise<Certificate[]>;
   /**

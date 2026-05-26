@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { CancelarNFeController } from '@modules/NFe/useCases/CancelarNFe/CancelarNFeController';
 import { EmitirCceController } from '@modules/NFe/useCases/EmitirCce/EmitirCceController';
+import { EmitirEpecController } from '@modules/NFe/useCases/EmitirEpec/EmitirEpecController';
 import { EmitirNFeController } from '@modules/NFe/useCases/EmitirNFe/EmitirNFeController';
 import { GenerateDanfeController } from '@modules/NFe/useCases/GenerateDanfe/GenerateDanfeController';
 import { GetNFeController } from '@modules/NFe/useCases/GetNFe/GetNFeController';
@@ -17,6 +18,7 @@ import { validate } from '@shared/infra/http/middlewares/validate';
 import {
   cancelarNFeSchema,
   emitirCceSchema,
+  emitirEpecSchema,
   emitirNFeSchema,
   inutilizarNumeracaoSchema,
   listNFesQuerySchema,
@@ -29,6 +31,7 @@ const statusServicoController = new StatusServicoController();
 const emitirController = new EmitirNFeController();
 const cancelarController = new CancelarNFeController();
 const cceController = new EmitirCceController();
+const epecController = new EmitirEpecController();
 const inutilizarController = new InutilizarNumeracaoController();
 const getController = new GetNFeController();
 const listController = new ListNFesController();
@@ -76,6 +79,15 @@ nfeRoutes.post(
   requirePermission('nfe.cce', 'admin.full'),
   validate({ body: emitirCceSchema }),
   (req, res) => cceController.handle(req, res),
+);
+
+// Contingência EPEC — só deve ser usada quando SEFAZ normal E SVC estão DOWN. O
+// use case verifica essa pré-condição lendo o monitor de saúde (EP-06c).
+nfeRoutes.post(
+  '/:id/epec',
+  requirePermission('nfe.contingencia.epec', 'admin.full'),
+  validate({ body: emitirEpecSchema }),
+  (req, res) => epecController.handle(req, res),
 );
 
 // Inutilização não é sob :id (não há NFe, é faixa virgem). Rota separada.

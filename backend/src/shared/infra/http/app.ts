@@ -1,6 +1,9 @@
 import 'reflect-metadata';
-import '@shared/types/express';
 
+// As augmentações do Express.Request (user, companyId, validatedQuery) ficam em
+// `shared/types/express.d.ts`. Não importamos o arquivo aqui de propósito — o tsc
+// já o carrega via `tsconfig.include` (que casa com .d.ts), e o tsx em runtime
+// ignora arquivos .d.ts. Importar explicitamente quebra o tsx.
 import cors from 'cors';
 import express, { Express } from 'express';
 import helmet from 'helmet';

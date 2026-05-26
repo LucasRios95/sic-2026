@@ -9,4 +9,7 @@ export interface IInterstateAliquotRepository {
 
   /** Inserir / atualizar via processo de atualização normativa. */
   upsert(data: Omit<InterstateAliquot, 'id' | 'createdAt' | 'updatedAt'>): Promise<InterstateAliquot>;
+
+  /** Lista todas as alíquotas — usado pelo dashboard read-only (~700 entradas). */
+  listAll(): Promise<InterstateAliquot[]>;
 }

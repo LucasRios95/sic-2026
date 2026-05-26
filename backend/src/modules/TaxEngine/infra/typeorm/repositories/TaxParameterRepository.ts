@@ -2,7 +2,10 @@ import { IsNull, LessThanOrEqual, MoreThan, Repository } from 'typeorm';
 
 import { appDataSource } from '@shared/infra/typeorm/data-source';
 
-import { ITaxParameterRepository } from '../../../repositories/ITaxParameterRepository';
+import {
+  ITaxParameterRepository,
+  ListTaxParametersFilter,
+} from '../../../repositories/ITaxParameterRepository';
 import { TaxParameter } from '../entities/TaxParameter';
 
 export class TaxParameterRepository implements ITaxParameterRepository {
@@ -61,5 +64,22 @@ export class TaxParameterRepository implements ITaxParameterRepository {
     }
     const created = this.repo.create(data);
     return this.repo.save(created);
+  }
+
+  async list(filter: ListTaxParametersFilter = {}): Promise<TaxParameter[]> {
+    const qb = this.repo
+      .createQueryBuilder('tp')
+      .orderBy('tp.chave', 'ASC')
+      .addOrderBy('tp.valid_from', 'DESC');
+
+    if (filter.companyId === null) {
+      qb.andWhere('tp.company_id IS NULL');
+    } else if (typeof filter.companyId === 'string') {
+      qb.andWhere('tp.company_id = :companyId', { companyId: filter.companyId });
+    }
+    if (filter.chavePrefix) {
+      qb.andWhere('tp.chave LIKE :prefix', { prefix: `${filter.chavePrefix}%` });
+    }
+    return qb.limit(500).getMany();
   }
 }

@@ -13,9 +13,9 @@ import { env } from '@config/env';
  */
 const isCompiled = __filename.endsWith('.js');
 const ext = isCompiled ? 'js' : 'ts';
-const rootDir = isCompiled
-  ? path.resolve(__dirname, '..', '..', '..')
-  : path.resolve(__dirname, '..', '..', '..', 'src');
+// data-source.{ts,js} fica em `<project>/{src,dist}/shared/infra/typeorm/`.
+// Subir 3 níveis nos dois casos chega na raiz correta (src/ em dev, dist/ em produção).
+const rootDir = path.resolve(__dirname, '..', '..', '..');
 
 export const dataSourceOptions: DataSourceOptions = {
   type: 'postgres',

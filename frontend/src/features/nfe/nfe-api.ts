@@ -62,11 +62,61 @@ export interface EmitirNFeItemPayload {
   valorDesconto?: string;
 }
 
+export type TipoOperacao = 'ENTRADA' | 'SAIDA';
+export type FinalidadeNFe =
+  | 'NORMAL'
+  | 'COMPLEMENTAR'
+  | 'AJUSTE'
+  | 'DEVOLUCAO'
+  | 'NOTA_CREDITO'
+  | 'NOTA_DEBITO';
+
+/**
+ * Códigos modFrete:
+ *   0 = CIF (remetente paga)
+ *   1 = FOB (destinatário paga)
+ *   2 = Terceiros
+ *   3 = Próprio remetente
+ *   4 = Próprio destinatário
+ *   9 = Sem ocorrência de transporte
+ */
+export type ModFrete = 0 | 1 | 2 | 3 | 4 | 9;
+
+export interface NFeTransportadoraInput {
+  cnpjCpf?: string | null;
+  nome?: string | null;
+  ie?: string | null;
+  endereco?: string | null;
+  municipio?: string | null;
+  uf?: string | null;
+}
+
+export interface NFeVolumeInput {
+  quantidade?: number;
+  especie?: string | null;
+  marca?: string | null;
+  numeracao?: string | null;
+  pesoLiquido?: string | null;
+  pesoBruto?: string | null;
+}
+
+export interface NFeTransporteInput {
+  transportadora?: NFeTransportadoraInput;
+  veiculo?: { placa: string; uf: string; rntc?: string | null };
+  volumes?: NFeVolumeInput[];
+}
+
 export interface EmitirNFePayload {
   idempotencyKey: string;
   customerId: string;
   serie: number;
   naturezaOperacao: string;
+  tipoOperacao?: TipoOperacao;
+  finalidade?: FinalidadeNFe;
+  /** NF-e referenciadas (chave 44 dígitos). Obrigatório para devolução/complementar/ajuste. */
+  nfeReferenciadas?: Array<{ chaveAcesso: string }>;
+  modalidadeFrete?: ModFrete;
+  transporte?: NFeTransporteInput;
   itens: EmitirNFeItemPayload[];
   pagamentos: Array<{ meio: string; valor: string }>;
   infCpl?: string;

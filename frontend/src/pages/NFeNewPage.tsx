@@ -4,7 +4,13 @@ import { useMemo, useState } from 'react';
 
 import { listCertificates } from '@/features/certificates/certificates-api';
 import { listCustomers } from '@/features/customers/customers-api';
-import { emitirNFe, simulateTax } from '@/features/nfe/nfe-api';
+import {
+  emitirNFe,
+  simulateTax,
+  type FinalidadeNFe,
+  type ModFrete,
+  type TipoOperacao,
+} from '@/features/nfe/nfe-api';
 import { listProducts } from '@/features/products/products-api';
 import { ApiError } from '@/lib/api';
 import { Badge } from '@/shared/components/ui/Badge';
@@ -39,17 +45,56 @@ const makeRow = (): ItemRow => ({
   valorUnitario: '0.00',
 });
 
+const FINALIDADE_LABEL: Record<FinalidadeNFe, string> = {
+  NORMAL: 'Normal',
+  COMPLEMENTAR: 'Complementar',
+  AJUSTE: 'Ajuste',
+  DEVOLUCAO: 'Devolução',
+  NOTA_CREDITO: 'Nota de crédito (Reforma)',
+  NOTA_DEBITO: 'Nota de débito (Reforma)',
+};
+
+/** Finalidades que EXIGEM NF-e referenciada (grupo NFref). */
+const FINALIDADES_COM_REF: FinalidadeNFe[] = [
+  'COMPLEMENTAR',
+  'AJUSTE',
+  'DEVOLUCAO',
+  'NOTA_CREDITO',
+  'NOTA_DEBITO',
+];
+
 export function NFeNewPage(): React.ReactElement {
   const navigate = useNavigate();
   const [customerId, setCustomerId] = useState('');
   const [serie, setSerie] = useState(1);
   const [naturezaOperacao, setNaturezaOperacao] = useState('Venda de Mercadoria');
+  const [tipoOperacao, setTipoOperacao] = useState<TipoOperacao>('SAIDA');
+  const [finalidade, setFinalidade] = useState<FinalidadeNFe>('NORMAL');
+  const [chavesReferenciadas, setChavesReferenciadas] = useState<string[]>([]);
   const [infCpl, setInfCpl] = useState('');
   const [items, setItems] = useState<ItemRow[]>([makeRow()]);
   const [pagamentoMeio, setPagamentoMeio] = useState('01');
   const [certificateVaultRef, setCertificateVaultRef] = useState('');
   const [transmitirImediatamente, setTransmitirImediatamente] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Transporte
+  const [modFrete, setModFrete] = useState<ModFrete>(9);
+  const [transpCnpjCpf, setTranspCnpjCpf] = useState('');
+  const [transpNome, setTranspNome] = useState('');
+  const [transpIE, setTranspIE] = useState('');
+  const [transpEndereco, setTranspEndereco] = useState('');
+  const [transpMunicipio, setTranspMunicipio] = useState('');
+  const [transpUf, setTranspUf] = useState('');
+  const [veicPlaca, setVeicPlaca] = useState('');
+  const [veicUf, setVeicUf] = useState('');
+  const [volQtd, setVolQtd] = useState('');
+  const [volEspecie, setVolEspecie] = useState('');
+  const [volPesoLiq, setVolPesoLiq] = useState('');
+  const [volPesoBruto, setVolPesoBruto] = useState('');
+
+  const exigeReferencia = FINALIDADES_COM_REF.includes(finalidade);
+  const transporteHabilitado = modFrete !== 9;
 
   const customersQuery = useQuery({
     queryKey: ['customers', 'select'],
@@ -100,12 +145,58 @@ export function NFeNewPage(): React.ReactElement {
   const valorTotal = simulationQuery.data?.totais.valorTotal ?? '0.00';
 
   const emitirMutation = useMutation({
-    mutationFn: () =>
-      emitirNFe({
+    mutationFn: () => {
+      const chavesValidas = chavesReferenciadas
+        .map((c) => c.replace(/\D/g, ''))
+        .filter((c) => c.length === 44);
+      // Monta transporte só quando há dado real (evita enviar objeto vazio).
+      const transportadoraTemDado =
+        transpCnpjCpf || transpNome || transpIE || transpEndereco || transpMunicipio || transpUf;
+      const veiculoTemDado = veicPlaca && veicUf;
+      const volumeTemDado =
+        volQtd || volEspecie || volPesoLiq || volPesoBruto;
+      const transporte =
+        transportadoraTemDado || veiculoTemDado || volumeTemDado
+          ? {
+              transportadora: transportadoraTemDado
+                ? {
+                    cnpjCpf: transpCnpjCpf || undefined,
+                    nome: transpNome || undefined,
+                    ie: transpIE || undefined,
+                    endereco: transpEndereco || undefined,
+                    municipio: transpMunicipio || undefined,
+                    uf: transpUf ? transpUf.toUpperCase() : undefined,
+                  }
+                : undefined,
+              veiculo: veiculoTemDado
+                ? { placa: veicPlaca.toUpperCase(), uf: veicUf.toUpperCase() }
+                : undefined,
+              volumes: volumeTemDado
+                ? [
+                    {
+                      quantidade: volQtd ? Number(volQtd) : undefined,
+                      especie: volEspecie || undefined,
+                      pesoLiquido: volPesoLiq || undefined,
+                      pesoBruto: volPesoBruto || undefined,
+                    },
+                  ]
+                : undefined,
+            }
+          : undefined;
+
+      return emitirNFe({
         idempotencyKey: `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         customerId,
         serie,
         naturezaOperacao,
+        tipoOperacao,
+        finalidade,
+        modalidadeFrete: modFrete,
+        transporte,
+        nfeReferenciadas:
+          chavesValidas.length > 0
+            ? chavesValidas.map((chaveAcesso) => ({ chaveAcesso }))
+            : undefined,
         infCpl: infCpl || undefined,
         itens: items
           .filter((it) => it.productId)
@@ -122,13 +213,33 @@ export function NFeNewPage(): React.ReactElement {
         pagamentos: [{ meio: pagamentoMeio, valor: valorTotal }],
         certificateVaultRef: certificateVaultRef || undefined,
         transmitirImediatamente,
-      }),
+      });
+    },
     onSuccess: ({ nfe }) => navigate({ to: '/fiscal/nfe/$id', params: { id: nfe.id } }),
     onError: (err) => setError(err instanceof ApiError ? err.message : 'Falha ao emitir NF-e'),
   });
 
   function updateItem(id: string, patch: Partial<ItemRow>): void {
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
+  }
+
+  /**
+   * Quando o usuário troca o produto numa linha, autopreenche o CFOP usando o padrão
+   * cadastrado no produto (cfopPadraoSaida ou cfopPadraoEntrada conforme tipoOperacao).
+   * Quando o produto não tem padrão, mantém o CFOP que já estava no row.
+   *
+   * Ajuste estadual↔interestadual (5↔6 / 1↔2) fica no backend — o use case `EmitirNFe`
+   * tem company.uf + customer.uf carregados e faz a substituição correta antes da
+   * transmissão. Aqui só sugere; o faturista pode editar.
+   */
+  function aplicarProduto(rowId: string, productId: string): void {
+    const product = productsQuery.data?.items.find((p) => p.id === productId);
+    const baseCfop = product
+      ? tipoOperacao === 'SAIDA'
+        ? product.cfopPadraoSaida
+        : product.cfopPadraoEntrada
+      : null;
+    updateItem(rowId, { productId, ...(baseCfop ? { cfop: baseCfop } : {}) });
   }
 
   function removeItem(id: string): void {
@@ -170,6 +281,34 @@ export function NFeNewPage(): React.ReactElement {
                   value={serie}
                   onChange={(e) => setSerie(Number(e.target.value))}
                 />
+              </div>
+              <div className="space-y-1">
+                <Label>Tipo de operação (tpNF)</Label>
+                <Select
+                  value={tipoOperacao}
+                  onChange={(e) => setTipoOperacao(e.target.value as TipoOperacao)}
+                >
+                  <option value="SAIDA">Saída (venda, transferência, remessa)</option>
+                  <option value="ENTRADA">Entrada (compra, retorno, devolução recebida)</option>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Finalidade (finNFe)</Label>
+                <Select
+                  value={finalidade}
+                  onChange={(e) => setFinalidade(e.target.value as FinalidadeNFe)}
+                >
+                  {(Object.keys(FINALIDADE_LABEL) as FinalidadeNFe[]).map((f) => (
+                    <option key={f} value={f}>
+                      {FINALIDADE_LABEL[f]}
+                    </option>
+                  ))}
+                </Select>
+                {exigeReferencia && (
+                  <p className="text-xs text-amber-700">
+                    Esta finalidade exige NF-e referenciada (chave de 44 dígitos).
+                  </p>
+                )}
               </div>
               <div className="col-span-2 space-y-1">
                 <Label>Natureza da operação</Label>
@@ -233,6 +372,70 @@ export function NFeNewPage(): React.ReactElement {
         </Card>
       </div>
 
+      {(exigeReferencia || chavesReferenciadas.length > 0) && (
+        <Card className={exigeReferencia ? 'border-amber-300' : ''}>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-base">NF-e referenciadas</CardTitle>
+              <CardDescription>
+                {exigeReferencia
+                  ? `Obrigatório para finalidade ${FINALIDADE_LABEL[finalidade]}. ` +
+                    'Informe a chave de acesso (44 dígitos) da NF-e original.'
+                  : 'Lista de NF-e referenciadas no grupo NFref do XML.'}
+              </CardDescription>
+            </div>
+            <Button
+              variant="secondary"
+              onClick={() => setChavesReferenciadas((p) => [...p, ''])}
+            >
+              Adicionar chave
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {chavesReferenciadas.length === 0 ? (
+              <Button
+                variant="outline"
+                onClick={() => setChavesReferenciadas([''])}
+              >
+                Informar chave referenciada
+              </Button>
+            ) : (
+              chavesReferenciadas.map((chave, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <div className="flex-1 space-y-1">
+                    <Label className="text-xs">Chave NF-e #{idx + 1}</Label>
+                    <Input
+                      value={chave}
+                      onChange={(e) =>
+                        setChavesReferenciadas((prev) => {
+                          const next = [...prev];
+                          next[idx] = e.target.value.replace(/\D/g, '').slice(0, 44);
+                          return next;
+                        })
+                      }
+                      placeholder="44 dígitos sem separadores"
+                      maxLength={44}
+                      className="font-mono"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {chave.replace(/\D/g, '').length}/44 dígitos
+                    </p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    onClick={() =>
+                      setChavesReferenciadas((prev) => prev.filter((_, i) => i !== idx))
+                    }
+                  >
+                    ✕
+                  </Button>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
@@ -255,7 +458,7 @@ export function NFeNewPage(): React.ReactElement {
                 <Label className="text-xs">Produto #{idx + 1}</Label>
                 <Select
                   value={row.productId}
-                  onChange={(e) => updateItem(row.id, { productId: e.target.value })}
+                  onChange={(e) => aplicarProduto(row.id, e.target.value)}
                 >
                   <option value="">Selecione…</option>
                   {productsQuery.data?.items.map((p) => (
@@ -292,6 +495,148 @@ export function NFeNewPage(): React.ReactElement {
               </Button>
             </div>
           ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Transporte</CardTitle>
+          <CardDescription>
+            Modalidade de frete (modFrete) é obrigatória. Transportadora, veículo e
+            volumes são opcionais — preencha quando aplicável.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-1">
+            <Label>Modalidade do frete</Label>
+            <Select
+              value={String(modFrete)}
+              onChange={(e) => setModFrete(Number(e.target.value) as ModFrete)}
+            >
+              <option value="9">9 — Sem ocorrência de transporte</option>
+              <option value="0">0 — Contratação por conta do remetente (CIF)</option>
+              <option value="1">1 — Contratação por conta do destinatário (FOB)</option>
+              <option value="2">2 — Contratação por conta de terceiros</option>
+              <option value="3">3 — Transporte próprio do remetente</option>
+              <option value="4">4 — Transporte próprio do destinatário</option>
+            </Select>
+          </div>
+
+          {transporteHabilitado && (
+            <>
+              <div className="border-t border-border pt-3 space-y-3">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Transportadora (opcional)
+                </Label>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">CNPJ/CPF</Label>
+                    <Input
+                      value={transpCnpjCpf}
+                      onChange={(e) => setTranspCnpjCpf(e.target.value)}
+                      placeholder="Apenas dígitos"
+                    />
+                  </div>
+                  <div className="space-y-1 col-span-2">
+                    <Label className="text-xs">Razão social / Nome</Label>
+                    <Input value={transpNome} onChange={(e) => setTranspNome(e.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">IE</Label>
+                    <Input value={transpIE} onChange={(e) => setTranspIE(e.target.value)} />
+                  </div>
+                  <div className="space-y-1 col-span-2">
+                    <Label className="text-xs">Endereço</Label>
+                    <Input
+                      value={transpEndereco}
+                      onChange={(e) => setTranspEndereco(e.target.value)}
+                      placeholder="Rua/avenida, número, bairro"
+                    />
+                  </div>
+                  <div className="space-y-1 col-span-2">
+                    <Label className="text-xs">Município</Label>
+                    <Input
+                      value={transpMunicipio}
+                      onChange={(e) => setTranspMunicipio(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">UF</Label>
+                    <Input
+                      value={transpUf}
+                      onChange={(e) => setTranspUf(e.target.value.toUpperCase())}
+                      maxLength={2}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-border pt-3 space-y-3">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Veículo (opcional)
+                </Label>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1 col-span-2">
+                    <Label className="text-xs">Placa</Label>
+                    <Input
+                      value={veicPlaca}
+                      onChange={(e) => setVeicPlaca(e.target.value.toUpperCase())}
+                      placeholder="ABC1D23 ou ABC1234"
+                      maxLength={8}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">UF</Label>
+                    <Input
+                      value={veicUf}
+                      onChange={(e) => setVeicUf(e.target.value.toUpperCase())}
+                      maxLength={2}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-border pt-3 space-y-3">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Volume (opcional)
+                </Label>
+                <div className="grid grid-cols-4 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Quantidade</Label>
+                    <Input
+                      type="number"
+                      value={volQtd}
+                      onChange={(e) => setVolQtd(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Espécie</Label>
+                    <Input
+                      value={volEspecie}
+                      onChange={(e) => setVolEspecie(e.target.value)}
+                      placeholder="CX, PCT..."
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Peso líquido (kg)</Label>
+                    <Input
+                      value={volPesoLiq}
+                      onChange={(e) => setVolPesoLiq(e.target.value)}
+                      placeholder="0.000"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Peso bruto (kg)</Label>
+                    <Input
+                      value={volPesoBruto}
+                      onChange={(e) => setVolPesoBruto(e.target.value)}
+                      placeholder="0.000"
+                    />
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 
@@ -368,7 +713,12 @@ export function NFeNewPage(): React.ReactElement {
           <Button
             onClick={() => emitirMutation.mutate()}
             loading={emitirMutation.isPending}
-            disabled={!customerId || items.every((it) => !it.productId)}
+            disabled={
+              !customerId ||
+              items.every((it) => !it.productId) ||
+              (exigeReferencia &&
+                !chavesReferenciadas.some((c) => c.replace(/\D/g, '').length === 44))
+            }
           >
             Emitir NF-e
           </Button>

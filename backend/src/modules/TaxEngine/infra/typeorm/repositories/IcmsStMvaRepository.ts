@@ -45,4 +45,11 @@ export class IcmsStMvaRepository implements IIcmsStMvaRepository {
     const created = this.repo.create(data);
     return this.repo.save(created);
   }
+
+  async listAll(): Promise<IcmsStMva[]> {
+    return this.repo.find({
+      order: { ufOrigem: 'ASC', ufDestino: 'ASC', ncm: 'ASC' },
+      take: 1000,
+    });
+  }
 }
