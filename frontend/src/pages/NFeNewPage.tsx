@@ -73,10 +73,9 @@ export function NFeNewPage(): React.ReactElement {
   const { reissueFrom } = useSearch({ from: '/app-layout/fiscal/nfe/new' });
   const [customerId, setCustomerId] = useState('');
   const [serie, setSerie] = useState(1);
-  // Campo numero editavel. Pre-populado com o proximo da serie via GET
-  // /nfe/proximo-numero. Vazio = backend aloca automatico (mesmo comportamento de antes).
+  // Campo numero SEMPRE preenchido pelo faturista. Mostramos o "ultimo usado"
+  // logo abaixo como referencia. Vazio no envio = backend aloca automatico.
   const [numero, setNumero] = useState('');
-  const [numeroEditado, setNumeroEditado] = useState(false);
   const [naturezaOperacao, setNaturezaOperacao] = useState('Venda de Mercadoria');
   const [tipoOperacao, setTipoOperacao] = useState<TipoOperacao>('SAIDA');
   const [finalidade, setFinalidade] = useState<FinalidadeNFe>('NORMAL');
@@ -127,20 +126,24 @@ export function NFeNewPage(): React.ReactElement {
     queryFn: listCertificates,
   });
 
-  // Le o proximo numero da serie (sem reservar). Re-roda quando o usuario troca
-  // a serie -- evita mostrar numero errado se o faturista mudar serie no meio.
-  // Se o usuario JA editou manualmente o campo, nao sobrescreve.
+  // Auto-seleciona o certificado quando só existe um ativo cadastrado. Sem isso o
+  // faturista esquece de escolher no dropdown e a nota fica em PENDING (caminho do
+  // EmitirNFeUseCase quando certificateVaultRef vem vazio). Caso haja >1 certificado
+  // ativo, mantém o select vazio — escolha consciente do usuário.
+  useEffect(() => {
+    if (certificateVaultRef) return;
+    const ativos = certificatesQuery.data?.filter((c) => c.active) ?? [];
+    if (ativos.length === 1) setCertificateVaultRef(ativos[0].id);
+  }, [certificatesQuery.data, certificateVaultRef]);
+
+  // Le proximo + ultimo usado da serie (sem reservar). Re-roda quando o usuario
+  // troca a serie. UI usa o ultimoUsado como referencia informativa; o faturista
+  // digita o numero a usar.
   const proximoNumeroQuery = useQuery({
     queryKey: ['proximoNumero', serie],
     queryFn: () => getProximoNumero(serie),
     enabled: serie > 0,
   });
-
-  useEffect(() => {
-    if (proximoNumeroQuery.data && !numeroEditado) {
-      setNumero(proximoNumeroQuery.data.proximoNumero);
-    }
-  }, [proximoNumeroQuery.data, numeroEditado]);
 
   // Quando o usuário muda o cliente selecionado, garante que temos o objeto completo
   // (uf, consumidorFinal, indicadorIE — atributos que o simulate precisa).
@@ -239,6 +242,10 @@ export function NFeNewPage(): React.ReactElement {
     if (source.customerId) setCustomerId(source.customerId);
     if (source.naturezaOperacao) setNaturezaOperacao(source.naturezaOperacao);
     setSerie(source.serie);
+    // Reemissao reusa a numeracao da nota original. O backend (EmitirNFeUseCase)
+    // detecta a NFe REJECTED/PENDING no mesmo slot e a descarta antes de criar a
+    // nova com o mesmo numero. Fixamos aqui e desabilitamos o input.
+    setNumero(String(source.numero));
 
     // Itens: usa productId quando disponivel (item NFe persiste a FK).
     if (source.items.length > 0) {
@@ -330,11 +337,9 @@ export function NFeNewPage(): React.ReactElement {
         idempotencyKey: `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         customerId,
         serie,
-        // Envia o numero so quando o faturista alterou OU quando o backend nao
-        // tem proximo (campo vazio). Se for o valor "natural" que veio do peek,
-        // omitimos -- backend aloca automatico do mesmo jeito (evita race se o
-        // numero foi reservado por outra emissao no meio).
-        numero: numero && numeroEditado ? numero : undefined,
+        // Numero sempre digitado pelo faturista. Quando vazio, backend aloca o
+        // proximo automaticamente; quando preenchido, backend forca esse valor.
+        numero: numero ? numero : undefined,
         naturezaOperacao,
         tipoOperacao,
         finalidade,
@@ -360,8 +365,20 @@ export function NFeNewPage(): React.ReactElement {
         transmitirImediatamente,
       });
     },
-    onSuccess: ({ nfe }) => navigate({ to: '/fiscal/nfe/$id', params: { id: nfe.id } }),
-    onError: (err) => setError(err instanceof ApiError ? err.message : 'Falha ao emitir NF-e'),
+    onSuccess: ({ nfe, transmissionError }) => {
+      // Mesmo em sucesso HTTP, a transmissao SEFAZ pode ter falhado e a NFe ficado
+      // em PROCESSING. Mostramos o erro e nao redirecionamos pra detalhe -- o
+      // usuario decide se corrige ou se vai ver o historico.
+      if (transmissionError) {
+        setError(
+          `NF-e ${String(nfe.numero).padStart(9, '0')} criada mas a transmissao falhou: ${transmissionError}. ` +
+            'A nota ficou em PROCESSAMENTO — voce pode reemitir corrigindo o problema.',
+        );
+        return;
+      }
+      void navigate({ to: '/fiscal/nfe/$id', params: { id: nfe.id } });
+    },
+    onError: (err) => setError(formatEmitError(err)),
   });
 
   function updateItem(id: string, patch: Partial<ItemRow>): void {
@@ -444,10 +461,9 @@ export function NFeNewPage(): React.ReactElement {
                   <Input
                     type="number"
                     value={serie}
-                    onChange={(e) => {
-                      setSerie(Number(e.target.value));
-                      setNumeroEditado(false); // re-sincroniza com proximo da nova serie
-                    }}
+                    onChange={(e) => setSerie(Number(e.target.value))}
+                    disabled={!!reissueFrom}
+                    readOnly={!!reissueFrom}
                   />
                 </div>
                 <div className="space-y-1">
@@ -455,19 +471,20 @@ export function NFeNewPage(): React.ReactElement {
                   <Input
                     type="number"
                     value={numero}
-                    onChange={(e) => {
-                      setNumero(e.target.value.replace(/\D/g, ''));
-                      setNumeroEditado(true);
-                    }}
-                    placeholder={proximoNumeroQuery.data?.proximoNumero ?? '...'}
+                    onChange={(e) => setNumero(e.target.value.replace(/\D/g, ''))}
+                    placeholder="Digite o número da nota"
+                    disabled={!!reissueFrom}
+                    readOnly={!!reissueFrom}
                   />
-                  {numeroEditado ? (
+                  {reissueFrom ? (
                     <p className="text-[10px] text-amber-700">
-                      Editado · backend força este número
+                      Reemissão · mantém o número original
                     </p>
                   ) : (
                     <p className="text-[10px] text-muted-foreground">
-                      Próximo da série · clique para editar
+                      {proximoNumeroQuery.data?.ultimoUsado
+                        ? `Último número usado: ${proximoNumeroQuery.data.ultimoUsado}`
+                        : 'Nenhuma nota emitida nesta série ainda'}
                     </p>
                   )}
                 </div>
@@ -894,7 +911,16 @@ export function NFeNewPage(): React.ReactElement {
               placeholder="Texto livre que aparece em infAdic/infCpl no XML"
             />
           </div>
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          {error ? (
+            <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3">
+              <div className="text-sm font-medium text-destructive mb-1">
+                Falha ao emitir
+              </div>
+              <pre className="whitespace-pre-wrap break-words font-mono text-xs text-destructive">
+                {error}
+              </pre>
+            </div>
+          ) : null}
         </CardContent>
         <CardContent className="pt-0 flex justify-end">
           <Button
@@ -913,6 +939,43 @@ export function NFeNewPage(): React.ReactElement {
       </Card>
     </div>
   );
+}
+
+/**
+ * Converte um ApiError (ou erro generico) numa mensagem amigavel pro usuario.
+ * O backend ja retorna code+message+details no envelope; aqui materializamos os
+ * details em texto plano pra UI mostrar logo (sem o faturista ter que abrir devtools).
+ */
+function formatEmitError(err: unknown): string {
+  if (!(err instanceof ApiError)) {
+    return err instanceof Error ? err.message : 'Falha ao emitir NF-e';
+  }
+
+  const lines: string[] = [];
+  // Code curto entre colchetes ajuda no suporte: o usuario consegue copiar.
+  lines.push(`[${err.code}] ${err.message}`);
+
+  // Detalhes: aceita { field, ...; warnings; fieldErrors; etc }. Achata em "chave: valor".
+  if (err.details && typeof err.details === 'object') {
+    const d = err.details as Record<string, unknown>;
+    const fieldErrors = d.fieldErrors as Record<string, string[]> | undefined;
+    if (fieldErrors) {
+      for (const [field, msgs] of Object.entries(fieldErrors)) {
+        lines.push(`  · ${field}: ${(msgs ?? []).join(', ')}`);
+      }
+    }
+    if (Array.isArray(d.formErrors) && d.formErrors.length > 0) {
+      lines.push(`  · ${(d.formErrors as string[]).join(' · ')}`);
+    }
+    // Outros campos simples (proximo, solicitado, field, ...) viram linhas.
+    for (const [k, v] of Object.entries(d)) {
+      if (k === 'fieldErrors' || k === 'formErrors' || k === 'stack') continue;
+      if (typeof v === 'string' || typeof v === 'number') lines.push(`  · ${k}: ${v}`);
+    }
+  }
+
+  if (err.requestId) lines.push(`  (requestId: ${err.requestId})`);
+  return lines.join('\n');
 }
 
 function Cell({

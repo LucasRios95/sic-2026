@@ -16,6 +16,8 @@ import { CertificateAccessor } from '@shared/container/providers/CertificateVaul
 import { BusinessRuleError, IntegrationError, NotFoundError } from '@shared/errors';
 import { logger } from '@shared/logger';
 
+import { IndicadorIntermediador, IndicadorPresenca } from '@shared/types/fiscal-enums';
+
 import { ChaveAcesso } from '../../domain/ChaveAcesso';
 import {
   DocumentStatus,
@@ -156,10 +158,24 @@ export class EmitirNFeUseCase {
         request.serie,
         request.numero,
       );
-      const REUSABLE_STATUSES = ['REJECTED', 'PENDING', 'DRAFT'];
+      const REUSABLE_STATUSES = ['REJECTED', 'PENDING', 'SUBMITTED', 'DRAFT', 'ERROR'];
       if (existing && REUSABLE_STATUSES.includes(existing.status)) {
+        // NFe rejeitada/pendente no mesmo slot — descarta pra reusar a numeracao.
         await this.nfeRepository.hardDelete(existing.id);
         slotReleased = true;
+      } else if (!existing) {
+        // Slot vago. Pode estar vago porque (a) numero >= proximoNumero (caso normal),
+        // ou (b) NFe anterior foi excluida via DELETE /nfe/:id (numero < proximoNumero).
+        // No caso (b), `allocateSpecificNumber` rejeitaria com NUMBERING_SERIES_NUMBER_USED
+        // porque a serie ja avancou. Detectamos via peek e pulamos o allocate.
+        const peek = await this.numberingRepository.peekProximoNumero(
+          company.id,
+          '55',
+          request.serie,
+        );
+        if (BigInt(request.numero) < BigInt(peek)) {
+          slotReleased = true;
+        }
       }
     }
     // Quando o slot foi liberado (NFe rejeitada/pendente descartada), evitamos
@@ -327,7 +343,8 @@ export class EmitirNFeUseCase {
       },
       itensCtx.map((it, idx) => {
         const r = calculo.itens[idx];
-        const src = (it as unknown as { __sourceItem: typeof request.itens[number] & { product: { codigo: string; ncm: string; cest?: string | null }; }; }).__sourceItem;
+        const src = (it as unknown as { __sourceItem: typeof request.itens[number] & { product: { codigo: string; ncm: string; cest?: string | null }; taxRule: { cstIcms?: string | null; csosnIcms?: string | null; cstIcmsSt?: string | null; cstIpi?: string | null; cstPis?: string | null; cstCofins?: string | null; }; }; }).__sourceItem;
+        const tr = src.taxRule;
         return {
           numeroItem: src.numeroItem,
           codigo: src.product.codigo,
@@ -344,12 +361,15 @@ export class EmitirNFeUseCase {
           valorSeguro: src.valorSeguro ?? '0',
           valorOutros: src.valorOutros ?? '0',
           productId: src.productId,
-          // tributos
+          // tributos — CSTs vêm da regra tributária vigente; valores do MotorTributario.
+          cstIcms: tr.cstIcms ?? null,
+          csosnIcms: tr.csosnIcms ?? null,
           baseIcms: r.baseIcms ?? null,
           aliqIcms: r.aliqIcms ?? null,
           valorIcms: r.valorIcms ?? null,
           motDesICMS: r.motDesICMS ?? null,
           valorIcmsDeson: r.valorIcmsDeson ?? null,
+          cstIcmsSt: tr.cstIcmsSt ?? null,
           baseIcmsST: r.baseIcmsST ?? null,
           aliqIcmsST: r.aliqIcmsST ?? null,
           valorIcmsST: r.valorIcmsST ?? null,
@@ -366,12 +386,15 @@ export class EmitirNFeUseCase {
           baseFCPUFDest: r.baseFCPUFDest ?? null,
           pFCPUFDest: r.pFCPUFDest ?? null,
           valorFCPUFDest: r.valorFCPUFDest ?? null,
+          cstIpi: tr.cstIpi ?? null,
           baseIpi: r.baseIpi ?? null,
           aliqIpi: r.aliqIpi ?? null,
           valorIpi: r.valorIpi ?? null,
+          cstPis: tr.cstPis ?? null,
           basePis: r.basePis ?? null,
           aliqPis: r.aliqPis ?? null,
           valorPis: r.valorPis ?? null,
+          cstCofins: tr.cstCofins ?? null,
           baseCofins: r.baseCofins ?? null,
           aliqCofins: r.aliqCofins ?? null,
           valorCofins: r.valorCofins ?? null,
@@ -389,6 +412,7 @@ export class EmitirNFeUseCase {
 
     // 7-9) Assina e transmite (caminho síncrono nesta versão)
     let finalNFe = persisted;
+    let transmissionError: string | null = null;
     const contingenciaSvc =
       formaEmissao === FormaEmissao.CONTINGENCIA_SVC_AN ||
       formaEmissao === FormaEmissao.CONTINGENCIA_SVC_RS;
@@ -406,9 +430,13 @@ export class EmitirNFeUseCase {
         // (TSK-112, próxima sessão) consultará por protocolo. Logamos como warning,
         // não como erro porque o caller PODE escolher reemitir.
         logger.warn({ err, nfeId: persisted.id }, 'Falha ao transmitir; NFe em PROCESSING');
+        transmissionError = err instanceof Error ? err.message : String(err);
         finalNFe = await this.nfeRepository.update(persisted.id, {
           status: DocumentStatus.PROCESSING,
           xmlAssinado: xmlUnsigned, // guarda mesmo sem assinatura — útil para debug
+          // Grava a mensagem no xMotivo pra UI mostrar o motivo da falha. Truncamos
+          // pra coluna varchar(300); detalhes completos ficam nos logs estruturados.
+          xMotivo: transmissionError.slice(0, 300),
         });
         if (err instanceof IntegrationError) {
           await this.notifications.warn({
@@ -450,7 +478,7 @@ export class EmitirNFeUseCase {
       });
     }
 
-    return { nfe: finalNFe, alreadyEmitted: false };
+    return { nfe: finalNFe, alreadyEmitted: false, transmissionError };
   }
 
   /**
@@ -658,7 +686,7 @@ export class EmitirNFeUseCase {
     customer: NonNullable<Awaited<ReturnType<ICustomerRepository['findById']>>>,
     request: EmitirNFeRequest,
     calculo: Awaited<ReturnType<MotorTributario['calcular']>>,
-    itensCtx: { __sourceItem: EmitirNFeRequest['itens'][number] & { product: { codigo: string; ncm: string; cest?: string | null }; descricao?: string } }[],
+    itensCtx: { __sourceItem: EmitirNFeRequest['itens'][number] & { product: { codigo: string; ncm: string; cest?: string | null }; descricao?: string; taxRule: { cstIcms?: string | null; csosnIcms?: string | null; cstIcmsSt?: string | null; cstIpi?: string | null; cEnq?: string | null; cstPis?: string | null; cstCofins?: string | null; modBC?: number | null; pRedBC?: string | null; } } }[],
     formaEmissao: FormaEmissao,
   ): NFeDocument {
     const operacaoInterestadual = customer.uf !== company.uf;
@@ -677,6 +705,16 @@ export class EmitirNFeUseCase {
         dhSaiEnt: request.dhSaiEnt,
         codigoNumerico,
         idDest: operacaoInterestadual ? 2 : 1,
+        // indPres é obrigatório no schema NF-e 4.00. Quando o caller não informa,
+        // assumimos OUTROS (9) — categoria "guarda-chuva" aceita pela SEFAZ para
+        // operações não-presenciais que não se encaixam em internet/teleatendimento.
+        // Faturas vindas do front com canal explícito devem sobrescrever isso futuramente.
+        indicadorPresenca: request.indicadorPresenca ?? IndicadorPresenca.OUTROS,
+        // indIntermed só faz sentido junto com indPres não-presencial. Sem marketplace
+        // de terceiro envolvido, o caller usa SEM_INTERMEDIADOR (0). O builder ignora
+        // este campo quando indPres = 0/1.
+        indicadorIntermediador:
+          request.indicadorIntermediador ?? IndicadorIntermediador.SEM_INTERMEDIADOR,
         nfeReferenciadas: request.nfeReferenciadas?.map((r) => ({
           tipo: 'NFE' as const,
           chaveAcesso: r.chaveAcesso.replace(/\D/g, ''),
@@ -724,6 +762,7 @@ export class EmitirNFeUseCase {
       itens: itensCtx.map<NFeItemDoc>((it, idx) => {
         const r = calculo.itens[idx];
         const src = it.__sourceItem;
+        const tr = src.taxRule;
         return {
           numero: src.numeroItem,
           codigo: src.product.codigo,
@@ -739,11 +778,16 @@ export class EmitirNFeUseCase {
           quantidadeTributavel: src.quantidade,
           valorUnitarioTrib: src.valorUnitario,
           origem: 0,
+          cstIcms: tr.cstIcms ?? undefined,
+          csosnIcms: tr.csosnIcms ?? undefined,
+          modBC: tr.modBC ?? undefined,
+          pRedBC: tr.pRedBC ?? undefined,
           baseIcms: r.baseIcms,
           aliqIcms: r.aliqIcms,
           valorIcms: r.valorIcms,
           valorIcmsDeson: r.valorIcmsDeson,
           motDesICMS: r.motDesICMS,
+          cstIcmsSt: tr.cstIcmsSt ?? undefined,
           baseIcmsST: r.baseIcmsST,
           aliqIcmsST: r.aliqIcmsST,
           valorIcmsST: r.valorIcmsST,
@@ -760,12 +804,16 @@ export class EmitirNFeUseCase {
           baseFCPUFDest: r.baseFCPUFDest,
           pFCPUFDest: r.pFCPUFDest,
           valorFCPUFDest: r.valorFCPUFDest,
+          cstIpi: tr.cstIpi ?? undefined,
+          cEnq: tr.cEnq ?? undefined,
           baseIpi: r.baseIpi,
           aliqIpi: r.aliqIpi,
           valorIpi: r.valorIpi,
+          cstPis: tr.cstPis ?? undefined,
           basePis: r.basePis,
           aliqPis: r.aliqPis,
           valorPis: r.valorPis,
+          cstCofins: tr.cstCofins ?? undefined,
           baseCofins: r.baseCofins,
           aliqCofins: r.aliqCofins,
           valorCofins: r.valorCofins,
@@ -867,6 +915,18 @@ export interface EmitirNFeRequest {
   tipoOperacao?: TipoOperacao;
   finalidade?: FinalidadeNFe;
   /**
+   * Indicador de presença do comprador (tag indPres, obrigatório no schema NF-e 4.00).
+   * Quando omitido, o use case assume OUTROS (9). O front pode setar PRESENCIAL,
+   * INTERNET etc. conforme o canal de venda real.
+   */
+  indicadorPresenca?: IndicadorPresenca;
+  /**
+   * Indicador de intermediador (tag indIntermed, NT 2020.006). Só é emitido quando
+   * `indicadorPresenca` é não-presencial — nesses casos, default `SEM_INTERMEDIADOR (0)`.
+   * Marketplace passa `MARKETPLACE_TERCEIRO (1)`.
+   */
+  indicadorIntermediador?: IndicadorIntermediador;
+  /**
    * Chaves de acesso (44 dígitos) referenciadas. Obrigatório quando a finalidade
    * é DEVOLUCAO, COMPLEMENTAR ou AJUSTE. Validamos isso no use case antes de transmitir.
    */
@@ -905,6 +965,13 @@ export interface EmitirNFeRequest {
 export interface EmitirNFeResponse {
   nfe: NFe;
   alreadyEmitted: boolean;
+  /**
+   * Quando preenchido, indica que houve falha na transmissão SOAP/SEFAZ e a NFe foi
+   * deixada em PROCESSING. O frontend usa isso para mostrar uma mensagem clara em vez
+   * de fingir sucesso. Em emissão idempotente repetida (`alreadyEmitted=true`) este
+   * campo vem `null` — o erro original já foi reportado na chamada anterior.
+   */
+  transmissionError?: string | null;
 }
 
 /** Mapeia cStat da SEFAZ para o nosso DocumentStatus. */

@@ -179,17 +179,24 @@ describe('NFeXmlBuilder', () => {
     expect(xml).toContain('<vICMS>12.00</vICMS>');
   });
 
-  it('renderiza grupos IBSCBS (RT 2025.002) com CST e cClassTrib', () => {
+  it('renderiza grupos IBSCBS (RT 2025.002) com estrutura aninhada oficial', () => {
     const xml = builder.build(makeDoc());
     expect(xml).toContain('<IBSCBS>');
-    expect(xml).toContain('<CST>TRIBUTACAO_INTEGRAL</CST>');
+    // CST sai como código numérico (000), não como o nome do enum.
+    expect(xml).toContain('<CST>000</CST>');
+    expect(xml).not.toContain('<CST>TRIBUTACAO_INTEGRAL</CST>');
     expect(xml).toContain('<cClassTrib>100000</cClassTrib>');
-    expect(xml).toContain('<pIBS>0.1000</pIBS>');
-    expect(xml).toContain('<pCBS>0.9000</pCBS>');
-    // Total IBSCBSTot só aparece quando há valor > 0.
-    expect(xml).toContain('<IBSCBSTot>');
-    expect(xml).toContain('<vIBS>0.10</vIBS>');
-    expect(xml).toContain('<vCBS>0.90</vCBS>');
+    // Estrutura aninhada: gIBSCBS → vBC, gIBSUF/gIBSMun, vIBS, gCBS.
+    expect(xml).toContain('<gIBSCBS><vBC>100.00</vBC>');
+    expect(xml).toContain('<gIBSUF><pIBSUF>0.1000</pIBSUF><vIBSUF>0.10</vIBSUF></gIBSUF>');
+    expect(xml).toContain('<gIBSMun><pIBSMun>0.0000</pIBSMun><vIBSMun>0.00</vIBSMun></gIBSMun>');
+    expect(xml).toContain('<gCBS><pCBS>0.9000</pCBS><vCBS>0.90</vCBS></gCBS>');
+    // A estrutura achatada antiga não deve mais existir.
+    expect(xml).not.toContain('<pIBS>');
+    // Totais IBSCBSTot com grupos gIBS/gCBS.
+    expect(xml).toContain('<IBSCBSTot><vBCIBSCBS>100.00</vBCIBSCBS>');
+    expect(xml).toContain('<vIBSUF>0.10</vIBSUF>');
+    expect(xml).toContain('<vCredPresCondSus>0.00</vCredPresCondSus>');
   });
 
   it('rejeita chave de acesso com DV inválido', () => {

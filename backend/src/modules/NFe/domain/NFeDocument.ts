@@ -2,7 +2,12 @@ import {
   AmbienteSefaz,
   CodigoRegimeTributario,
 } from '@modules/Companies/infra/typeorm/entities/Company';
-import { CstIbsCbs, IndicadorIE, IndicadorPresenca } from '@shared/types/fiscal-enums';
+import {
+  CstIbsCbs,
+  IndicadorIE,
+  IndicadorIntermediador,
+  IndicadorPresenca,
+} from '@shared/types/fiscal-enums';
 
 import { FinalidadeNFe, FormaEmissao, TipoOperacao } from './nfe-enums';
 
@@ -35,6 +40,12 @@ export interface NFeIdentificacao {
   dhSaiEnt?: Date;
   /** Indicador de presença do comprador (indPres). */
   indicadorPresenca?: IndicadorPresenca;
+  /**
+   * Indicador de intermediador (indIntermed) — NT 2020.006. Obrigatório quando
+   * `indicadorPresenca ∈ {INTERNET, TELEATENDIMENTO, ENTREGA_EM_DOMICILIO,
+   * PRESENCIAL_FORA_ESTABELECIMENTO, OUTROS}`. Sem ele a SEFAZ rejeita cStat 434.
+   */
+  indicadorIntermediador?: IndicadorIntermediador;
   /** Código numérico aleatório (cNF) — 8 dígitos. */
   codigoNumerico: string;
   /** Indica se a operação é interestadual (preenche idDest). */

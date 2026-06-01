@@ -5,6 +5,8 @@ import { useState } from 'react';
 import { listCertificates } from '@/features/certificates/certificates-api';
 import {
   cancelNFe,
+  deleteNFe,
+  downloadNFeXml,
   emitirCce,
   generateDanfe,
   getNFe,
@@ -50,6 +52,7 @@ export function NFeDetailsPage(): React.ReactElement {
   const [cceTexto, setCceTexto] = useState('');
   const [emailOpen, setEmailOpen] = useState(false);
   const [emailTo, setEmailTo] = useState('');
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const cancelMutation = useMutation({
@@ -60,7 +63,7 @@ export function NFeDetailsPage(): React.ReactElement {
       setCancelJust('');
       void queryClient.invalidateQueries({ queryKey: ['nfe', id] });
     },
-    onError: (e) => setActionError(e instanceof ApiError ? e.message : 'Falha ao cancelar.'),
+    onError: (e) => setActionError(formatActionError(e, 'Falha ao cancelar.')),
   });
 
   const cceMutation = useMutation({
@@ -70,7 +73,7 @@ export function NFeDetailsPage(): React.ReactElement {
       setCceTexto('');
       void queryClient.invalidateQueries({ queryKey: ['nfe', id] });
     },
-    onError: (e) => setActionError(e instanceof ApiError ? e.message : 'Falha ao emitir CC-e.'),
+    onError: (e) => setActionError(formatActionError(e, 'Falha ao emitir CC-e.')),
   });
 
   const danfeMutation = useMutation({
@@ -78,8 +81,12 @@ export function NFeDetailsPage(): React.ReactElement {
     onSuccess: (data) => {
       window.open(`${env.apiBaseUrl}${data.signedUrl}`, '_blank');
     },
-    onError: (e) =>
-      setActionError(e instanceof ApiError ? e.message : 'Falha ao gerar DANFE.'),
+    onError: (e) => setActionError(formatActionError(e, 'Falha ao gerar DANFE.')),
+  });
+
+  const downloadXmlMutation = useMutation({
+    mutationFn: () => downloadNFeXml(id),
+    onError: (e) => setActionError(formatActionError(e, 'Falha ao baixar XML.')),
   });
 
   const emailMutation = useMutation({
@@ -88,8 +95,18 @@ export function NFeDetailsPage(): React.ReactElement {
       setEmailOpen(false);
       setEmailTo('');
     },
-    onError: (e) =>
-      setActionError(e instanceof ApiError ? e.message : 'Falha ao enviar e-mail.'),
+    onError: (e) => setActionError(formatActionError(e, 'Falha ao enviar e-mail.')),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteNFe(id),
+    onSuccess: () => {
+      setDeleteOpen(false);
+      // Invalida lista pra refletir a remoção e volta pra ela.
+      void queryClient.invalidateQueries({ queryKey: ['nfe'] });
+      void navigate({ to: '/fiscal/nfe' });
+    },
+    onError: (e) => setActionError(formatActionError(e, 'Falha ao excluir NF-e.')),
   });
 
   if (isLoading) return <p>Carregando…</p>;
@@ -103,6 +120,14 @@ export function NFeDetailsPage(): React.ReactElement {
   // Reemissão: válida para NFe rejeitada ou que ficou pendente sem certificado
   // (PENDING). Para PROCESSING o caminho correto é esperar a reconciliação.
   const canReissue = nfe.status === 'REJECTED' || nfe.status === 'PENDING' || nfe.status === 'DENIED';
+  // Exclusão local: só status que nunca produziram efeito fiscal na SEFAZ.
+  // Espelha a lista do DeleteNFeUseCase.DELETABLE_STATUSES.
+  const canDelete = ['DRAFT', 'PENDING', 'SUBMITTED', 'REJECTED', 'ERROR'].includes(nfe.status);
+  // XML disponível: AUTHORIZED traz procNFe (assinado + protocolo). REJECTED/DENIED/SUBMITTED
+  // costumam ter só o XML assinado — ainda assim útil pra auditoria/reenvio manual.
+  const canDownloadXml = ['AUTHORIZED', 'REJECTED', 'DENIED', 'SUBMITTED', 'PROCESSING'].includes(
+    nfe.status,
+  );
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -153,6 +178,20 @@ export function NFeDetailsPage(): React.ReactElement {
               </Button>
             </>
           ) : null}
+          {canDownloadXml ? (
+            <Button
+              variant="secondary"
+              onClick={() => downloadXmlMutation.mutate()}
+              loading={downloadXmlMutation.isPending}
+              title={
+                isAuthorized
+                  ? 'Baixa o procNFe (XML assinado + protocolo).'
+                  : 'Baixa o XML da NF-e (sem protocolo — status não-autorizado).'
+              }
+            >
+              Baixar XML
+            </Button>
+          ) : null}
           {canReissue ? (
             <Button
               variant="primary"
@@ -162,9 +201,18 @@ export function NFeDetailsPage(): React.ReactElement {
                   search: { reissueFrom: id },
                 })
               }
-              title="Cria nova NF-e com os mesmos dados desta (cliente, itens, transporte). A NF-e atual fica como histórico."
+              title="Cria nova NF-e mantendo a mesma numeração desta (que será descartada do sistema)."
             >
               Reemitir
+            </Button>
+          ) : null}
+          {canDelete ? (
+            <Button
+              variant="destructive"
+              onClick={() => setDeleteOpen(true)}
+              title="Remove esta NF-e do sistema. Disponível apenas para notas que nunca foram autorizadas pela SEFAZ — libera a numeração para reuso."
+            >
+              Excluir
             </Button>
           ) : null}
         </div>
@@ -172,7 +220,12 @@ export function NFeDetailsPage(): React.ReactElement {
 
       {actionError ? (
         <Card className="border-destructive">
-          <CardContent className="pt-6 text-destructive">{actionError}</CardContent>
+          <CardContent className="pt-6 space-y-1">
+            <div className="text-sm font-medium text-destructive">Falha na ação</div>
+            <pre className="whitespace-pre-wrap break-words font-mono text-xs text-destructive">
+              {actionError}
+            </pre>
+          </CardContent>
         </Card>
       ) : null}
 
@@ -327,6 +380,31 @@ export function NFeDetailsPage(): React.ReactElement {
         </div>
       </Modal>
 
+      {/* === Modal: Excluir === */}
+      <Modal
+        open={deleteOpen}
+        title="Excluir NF-e do sistema"
+        description="Esta nota nunca foi autorizada na SEFAZ. Ao excluir, a numeração fica liberada para reuso."
+        onClose={() => setDeleteOpen(false)}
+        onConfirm={() => deleteMutation.mutate()}
+        confirmLabel="Confirmar exclusão"
+        destructive
+        loading={deleteMutation.isPending}
+      >
+        <div className="space-y-2 text-sm">
+          <p>
+            NF-e nº <strong>{String(nfe.numero).padStart(9, '0')}</strong>, série{' '}
+            <strong>{nfe.serie}</strong> — status{' '}
+            <Badge className={STATUS_STYLES[nfe.status]}>{STATUS_LABEL[nfe.status]}</Badge>
+          </p>
+          <p className="text-muted-foreground">
+            A nota será removida do banco local. Notas autorizadas, canceladas ou
+            denegadas não podem ser excluídas — use Cancelar (24h) ou Inutilizar
+            Faixa para esses casos.
+          </p>
+        </div>
+      </Modal>
+
       {/* === Modal: Email === */}
       <Modal
         open={emailOpen}
@@ -348,6 +426,32 @@ export function NFeDetailsPage(): React.ReactElement {
       </Modal>
     </div>
   );
+}
+
+/** Espelha o helper do NFeNewPage: materializa code+details+requestId num bloco unico. */
+function formatActionError(err: unknown, fallback: string): string {
+  if (!(err instanceof ApiError)) {
+    return err instanceof Error ? err.message : fallback;
+  }
+  const lines: string[] = [`[${err.code}] ${err.message}`];
+  if (err.details && typeof err.details === 'object') {
+    const d = err.details as Record<string, unknown>;
+    const fieldErrors = d.fieldErrors as Record<string, string[]> | undefined;
+    if (fieldErrors) {
+      for (const [field, msgs] of Object.entries(fieldErrors)) {
+        lines.push(`  · ${field}: ${(msgs ?? []).join(', ')}`);
+      }
+    }
+    if (Array.isArray(d.formErrors) && d.formErrors.length > 0) {
+      lines.push(`  · ${(d.formErrors as string[]).join(' · ')}`);
+    }
+    for (const [k, v] of Object.entries(d)) {
+      if (k === 'fieldErrors' || k === 'formErrors' || k === 'stack') continue;
+      if (typeof v === 'string' || typeof v === 'number') lines.push(`  · ${k}: ${v}`);
+    }
+  }
+  if (err.requestId) lines.push(`  (requestId: ${err.requestId})`);
+  return lines.join('\n');
 }
 
 function Row({

@@ -1,6 +1,8 @@
 import { Router } from 'express';
 
 import { CancelarNFeController } from '@modules/NFe/useCases/CancelarNFe/CancelarNFeController';
+import { DeleteNFeController } from '@modules/NFe/useCases/DeleteNFe/DeleteNFeController';
+import { DownloadXmlController } from '@modules/NFe/useCases/DownloadXml/DownloadXmlController';
 import { EmitirCceController } from '@modules/NFe/useCases/EmitirCce/EmitirCceController';
 import { EmitirEpecController } from '@modules/NFe/useCases/EmitirEpec/EmitirEpecController';
 import { EmitirNFeController } from '@modules/NFe/useCases/EmitirNFe/EmitirNFeController';
@@ -31,6 +33,7 @@ export const nfeRoutes = Router();
 const statusServicoController = new StatusServicoController();
 const emitirController = new EmitirNFeController();
 const cancelarController = new CancelarNFeController();
+const deleteController = new DeleteNFeController();
 const cceController = new EmitirCceController();
 const epecController = new EmitirEpecController();
 const inutilizarController = new InutilizarNumeracaoController();
@@ -38,6 +41,7 @@ const getController = new GetNFeController();
 const proximoNumeroController = new GetProximoNumeroController();
 const listController = new ListNFesController();
 const danfeController = new GenerateDanfeController();
+const downloadXmlController = new DownloadXmlController();
 const sendEmailController = new SendNFeByEmailController();
 
 nfeRoutes.use(requireAuth, tenantContext({ required: true }));
@@ -83,6 +87,15 @@ nfeRoutes.post(
   validate({ body: cancelarNFeSchema }),
   (req, res) => cancelarController.handle(req, res),
 );
+
+// Exclusão local — só para NF-e que nunca produziu efeito fiscal (DRAFT/PENDING/REJECTED/...).
+// Notas autorizadas/canceladas/denegadas têm registro na SEFAZ e ficam no histórico.
+nfeRoutes.delete(
+  '/:id',
+  requirePermission('nfe.cancel', 'admin.full'),
+  (req, res) => deleteController.handle(req, res),
+);
+
 nfeRoutes.post(
   '/:id/cce',
   requirePermission('nfe.cce', 'admin.full'),
@@ -113,6 +126,12 @@ nfeRoutes.post(
   '/:id/danfe',
   requirePermission('nfe.read', 'nfe.emit', 'admin.full'),
   (req, res) => danfeController.handle(req, res),
+);
+// Download do XML (procNFe quando autorizada, NFe assinada nos demais status com XML).
+nfeRoutes.get(
+  '/:id/xml',
+  requirePermission('nfe.read', 'nfe.emit', 'admin.full'),
+  (req, res) => downloadXmlController.handle(req, res),
 );
 // Envia XML + DANFE por e-mail (default = email do cliente; override via body.to).
 nfeRoutes.post(

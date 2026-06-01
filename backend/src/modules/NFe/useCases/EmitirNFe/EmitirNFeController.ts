@@ -12,8 +12,14 @@ export class EmitirNFeController {
       userId: request.user!.id,
     });
     return response.status(result.alreadyEmitted ? 200 : 201).json({
-      data: result.nfe,
-      meta: { alreadyEmitted: result.alreadyEmitted },
+      data: {
+        nfe: result.nfe,
+        alreadyEmitted: result.alreadyEmitted,
+        // Mensagem da falha de transmissao SOAP/SEFAZ, se houve. Frontend exibe
+        // explicitamente; nao silenciar e fingir sucesso quando a nota foi pra
+        // PROCESSING por causa de erro de rede/TLS/timeout.
+        transmissionError: result.transmissionError ?? null,
+      },
     });
   }
 }

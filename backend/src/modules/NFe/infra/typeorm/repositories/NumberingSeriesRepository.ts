@@ -136,4 +136,62 @@ export class NumberingSeriesRepository implements INumberingSeriesRepository {
     const series = await this.repo.findOne({ where: { companyId, modelo, serie } });
     return series?.proximoNumero ?? '1';
   }
+
+  async peekSeriesInfo(
+    companyId: string,
+    modelo: string,
+    serie: number,
+  ): Promise<{ proximoNumero: string; ultimoUsado: string | null }> {
+    await this.ensureSeries(companyId, modelo, serie);
+    const series = await this.repo.findOne({ where: { companyId, modelo, serie } });
+    return {
+      proximoNumero: series?.proximoNumero ?? '1',
+      ultimoUsado: series?.ultimoUsado ?? null,
+    };
+  }
+
+  async releaseLastIfMatches(
+    companyId: string,
+    modelo: string,
+    serie: number,
+    numero: string,
+  ): Promise<{ released: boolean; proximoNumero: string; ultimoUsado: string | null }> {
+    return appDataSource.transaction(async (manager) => {
+      const series = await manager
+        .createQueryBuilder(NumberingSeries, 's')
+        .setLock('pessimistic_write')
+        .where('s.company_id = :companyId', { companyId })
+        .andWhere('s.modelo = :modelo', { modelo })
+        .andWhere('s.serie = :serie', { serie })
+        .getOne();
+
+      if (!series) {
+        return { released: false, proximoNumero: '1', ultimoUsado: null };
+      }
+
+      // Só regride quando o número excluído é exatamente o último alocado. Se já houve
+      // outra alocação depois, o slot virou um buraco no meio da sequência — devolver o
+      // contador criaria ambiguidade. Faturista que quiser oficializar o gap usa Inutilização.
+      // Compara via BigInt pra ignorar formatação (zeros à esquerda etc.).
+      const numeroBig = BigInt(numero);
+      const ultimoBig = series.ultimoUsado != null ? BigInt(series.ultimoUsado) : null;
+      if (ultimoBig === null || ultimoBig !== numeroBig) {
+        return {
+          released: false,
+          proximoNumero: series.proximoNumero,
+          ultimoUsado: series.ultimoUsado ?? null,
+        };
+      }
+
+      const novoProximo = String(numeroBig);
+      const novoUltimoUsado = numeroBig > 1n ? String(numeroBig - 1n) : null;
+      await manager.update(
+        NumberingSeries,
+        { id: series.id },
+        { proximoNumero: novoProximo, ultimoUsado: novoUltimoUsado },
+      );
+
+      return { released: true, proximoNumero: novoProximo, ultimoUsado: novoUltimoUsado };
+    });
+  }
 }

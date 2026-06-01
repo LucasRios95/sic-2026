@@ -281,11 +281,29 @@ export class SefazSoapClient {
    * Extrai `cStat` e `xMotivo` do XML de resposta. A SEFAZ usa esses dois campos em
    * praticamente todas as respostas (status servico, autorização, evento), e são o
    * sinal primário se a chamada foi bem-sucedida.
+   *
+   * Em respostas de autorização (`retEnviNFe`), o envelope traz DOIS pares cStat/xMotivo:
+   *   1. No nível do lote (ex.: 104 "Lote processado") — só diz que o lote foi recebido.
+   *   2. Dentro de `protNFe/infProt` — o status REAL da NF-e (100 autorizada, 225 rejeição
+   *      de schema, etc.). É esse que precisa virar `nfes.c_stat`/`xMotivo`.
+   *
+   * A busca prefere o `infProt` (mais interno e específico) e cai pra busca recursiva
+   * só quando ele não existe (ex.: respostas de Status Serviço).
    */
   private extractStatus(xml: string): { cStat?: string; xMotivo?: string } {
     if (!xml) return {};
     try {
       const parsed = this.xmlParser.parse(xml) as Record<string, unknown>;
+      const infProt = this.findFirstByKey(parsed, 'infProt');
+      if (infProt && typeof infProt === 'object') {
+        const o = infProt as Record<string, unknown>;
+        if (o.cStat !== undefined || o.xMotivo !== undefined) {
+          return {
+            cStat: o.cStat !== undefined ? String(o.cStat) : undefined,
+            xMotivo: o.xMotivo !== undefined ? String(o.xMotivo) : undefined,
+          };
+        }
+      }
       const findRecursive = (obj: unknown): { cStat?: string; xMotivo?: string } => {
         if (!obj || typeof obj !== 'object') return {};
         const o = obj as Record<string, unknown>;
@@ -305,5 +323,17 @@ export class SefazSoapClient {
     } catch {
       return {};
     }
+  }
+
+  /** Procura recursivamente a primeira ocorrência de uma chave no objeto parseado. */
+  private findFirstByKey(obj: unknown, key: string): unknown {
+    if (!obj || typeof obj !== 'object') return undefined;
+    const o = obj as Record<string, unknown>;
+    if (o[key] !== undefined) return o[key];
+    for (const value of Object.values(o)) {
+      const found = this.findFirstByKey(value, key);
+      if (found !== undefined) return found;
+    }
+    return undefined;
   }
 }

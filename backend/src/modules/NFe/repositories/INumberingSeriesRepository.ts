@@ -52,4 +52,33 @@ export interface INumberingSeriesRepository {
    * Cria a série com proximoNumero=1 se não existir.
    */
   peekProximoNumero(companyId: string, modelo: string, serie: number): Promise<string>;
+
+  /**
+   * Lê próximo + último usado num único hit. UI usa o último como referência
+   * informativa ("Último número usado: X") — o faturista digita manualmente o que vier
+   * a seguir. `ultimoUsado` é null quando a série nunca foi consumida.
+   */
+  peekSeriesInfo(
+    companyId: string,
+    modelo: string,
+    serie: number,
+  ): Promise<{ proximoNumero: string; ultimoUsado: string | null }>;
+
+  /**
+   * Regride o contador da série QUANDO o `numero` informado é exatamente o último
+   * alocado (`ultimoUsado`). Caso típico: faturista emite, recebe rejeição/erro,
+   * exclui a NF-e — sem isso, o próximo emitido pularia o número descartado.
+   *
+   * Não regride se já houve outra alocação depois (`ultimoUsado != numero`) — devolver
+   * um gap a meio da sequência criaria ambiguidade fiscal. O caller deve tratar esse
+   * caso via Inutilização de numeração se quiser oficializar o salto.
+   *
+   * Usa lock pessimista pra evitar corrida com `allocateNumber` simultâneo.
+   */
+  releaseLastIfMatches(
+    companyId: string,
+    modelo: string,
+    serie: number,
+    numero: string,
+  ): Promise<{ released: boolean; proximoNumero: string; ultimoUsado: string | null }>;
 }

@@ -54,11 +54,20 @@ export async function listNFes(filter: ListNFesFilter = {}): Promise<{
 export async function getProximoNumero(
   serie = 1,
   modelo = '55',
-): Promise<{ modelo: string; serie: number; proximoNumero: string }> {
-  return api<{ modelo: string; serie: number; proximoNumero: string }>(
-    `/nfe/proximo-numero?serie=${serie}&modelo=${modelo}`,
-    { companyId: companyOrThrow() },
-  );
+): Promise<{
+  modelo: string;
+  serie: number;
+  proximoNumero: string;
+  ultimoUsado: string | null;
+}> {
+  return api<{
+    modelo: string;
+    serie: number;
+    proximoNumero: string;
+    ultimoUsado: string | null;
+  }>(`/nfe/proximo-numero?serie=${serie}&modelo=${modelo}`, {
+    companyId: companyOrThrow(),
+  });
 }
 
 export async function getNFe(id: string): Promise<NFeFull> {
@@ -144,10 +153,19 @@ export interface EmitirNFePayload {
   transmitirImediatamente?: boolean;
 }
 
-export async function emitirNFe(
-  payload: EmitirNFePayload,
-): Promise<{ nfe: NFeFull; alreadyEmitted: boolean }> {
-  return api<{ nfe: NFeFull; alreadyEmitted: boolean }>('/nfe', {
+export interface EmitirNFeResult {
+  nfe: NFeFull;
+  alreadyEmitted: boolean;
+  /**
+   * Mensagem da falha de transmissão quando a NFe foi para PROCESSING porque a
+   * chamada à SEFAZ falhou (timeout, TLS, 5xx). `null` significa transmissão OK
+   * ou que nem houve tentativa (sem certificado). UI exibe ao usuário.
+   */
+  transmissionError: string | null;
+}
+
+export async function emitirNFe(payload: EmitirNFePayload): Promise<EmitirNFeResult> {
+  return api<EmitirNFeResult>('/nfe', {
     method: 'POST',
     body: payload,
     companyId: companyOrThrow(),
@@ -166,6 +184,19 @@ export async function cancelNFe(
       companyId: companyOrThrow(),
     },
   );
+}
+
+/**
+ * Exclui a NF-e do sistema local. Backend rejeita se o status já produziu efeito
+ * fiscal (AUTHORIZED/CANCELLED/DENIED/INUTILIZED/PROCESSING) — ver DeleteNFeUseCase.
+ */
+export async function deleteNFe(
+  id: string,
+): Promise<{ deletedId: string; numero: string; serie: number }> {
+  return api<{ deletedId: string; numero: string; serie: number }>(`/nfe/${id}`, {
+    method: 'DELETE',
+    companyId: companyOrThrow(),
+  });
 }
 
 export async function emitirCce(
@@ -192,6 +223,38 @@ export async function generateDanfe(
       companyId: companyOrThrow(),
     },
   );
+}
+
+/**
+ * Baixa o XML da NF-e diretamente no navegador. Usamos fetch + Blob em vez de `window.open`
+ * porque o backend exige header Authorization — `<a href>` ou `window.open` não conseguem
+ * mandar o Bearer token. O nome do arquivo vem do header `Content-Disposition`.
+ */
+export async function downloadNFeXml(id: string): Promise<void> {
+  const companyId = companyOrThrow();
+  const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3333';
+  const response = await fetch(`${baseUrl}/nfe/${id}/xml`, {
+    headers: {
+      Authorization: `Bearer ${useAuthStore.getState().accessToken}`,
+      'X-Company-Id': companyId,
+    },
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(text || `Falha ao baixar XML (HTTP ${response.status})`);
+  }
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const filenameMatch = disposition.match(/filename="([^"]+)"/);
+  const filename = filenameMatch?.[1] ?? `nfe-${id}.xml`;
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export async function sendNFeByEmail(

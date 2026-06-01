@@ -2,7 +2,13 @@ import { create } from 'xmlbuilder2';
 import type { XMLBuilder } from 'xmlbuilder2/lib/interfaces';
 
 import { AmbienteSefaz, CodigoRegimeTributario } from '@modules/Companies/infra/typeorm/entities/Company';
-import { TipoPessoa } from '@shared/types/fiscal-enums';
+import {
+  CstIbsCbs,
+  IndicadorIE,
+  IndicadorIntermediador,
+  IndicadorPresenca,
+  TipoPessoa,
+} from '@shared/types/fiscal-enums';
 
 import { ChaveAcesso } from './ChaveAcesso';
 import {
@@ -79,6 +85,13 @@ export class NFeXmlBuilder {
     if (id.indicadorPresenca !== undefined) {
       ele.ele('indPres').txt(String(id.indicadorPresenca)).up();
     }
+    // indIntermed obrigatório quando indPres é não-presencial (NT 2020.006).
+    // Sem ele a SEFAZ retorna cStat 434. Quando o caller não informa explicitamente,
+    // assumimos "sem intermediador" (0) — caso da venda direta sem marketplace.
+    if (requiresIndIntermed(id.indicadorPresenca)) {
+      const indInter = id.indicadorIntermediador ?? IndicadorIntermediador.SEM_INTERMEDIADOR;
+      ele.ele('indIntermed').txt(String(indInter)).up();
+    }
     ele.ele('procEmi').txt('0').up(); // 0 = emissão por aplicativo do contribuinte
     ele.ele('verProc').txt('sic-2026/0.1.0').up();
     // NFref deve ser o ÚLTIMO grupo dentro de <ide> conforme MOC NF-e 7.00.
@@ -150,10 +163,25 @@ export class NFeXmlBuilder {
     } else {
       ele.ele('idEstrangeiro').txt(d.cnpjCpf).up();
     }
-    ele.ele('xNome').txt(d.nome).up();
+    // Regra antiga e estrita da SEFAZ (cStat 598): em ambiente de HOMOLOGAÇÃO, o nome
+    // do destinatário no XML precisa ser literalmente "NF-E EMITIDA EM AMBIENTE DE
+    // HOMOLOGACAO - SEM VALOR FISCAL" — proteção contra confusão com notas reais.
+    // O banco continua guardando o nome real (a substituição é só na serialização do XML).
+    const xNomeFinal =
+      doc.identificacao.ambiente === AmbienteSefaz.HOMOLOGACAO
+        ? 'NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL'
+        : d.nome;
+    ele.ele('xNome').txt(xNomeFinal).up();
     this.appendEndereco(ele, 'enderDest', d.endereco);
-    ele.ele('indIEDest').txt(IND_IE_CODIGO[d.indicadorIE]).up();
-    if (d.ie) ele.ele('IE').txt(d.ie).up();
+    // indIEDest: SP/RJ/MG e outras SEFAZes rejeitam o código 2 (ISENTO) com cStat 805 —
+    // a NT 2016.002 mantém os 3 códigos mas várias UFs descontinuaram o cadastro de
+    // contribuintes ISENTOS, então a guidance pública é usar 9 (Não Contribuinte) no
+    // lugar. PF nunca tem IE — força 9 mesmo se o cadastro veio com outro valor (dado ruim).
+    let indIEFinal: IndicadorIE = d.indicadorIE;
+    if (d.tipoPessoa === 'PF') indIEFinal = IndicadorIE.NAO_CONTRIBUINTE;
+    else if (indIEFinal === IndicadorIE.ISENTO) indIEFinal = IndicadorIE.NAO_CONTRIBUINTE;
+    ele.ele('indIEDest').txt(IND_IE_CODIGO[indIEFinal]).up();
+    if (d.ie && indIEFinal === IndicadorIE.CONTRIBUINTE) ele.ele('IE').txt(d.ie).up();
     if (d.suframa) ele.ele('ISUF').txt(d.suframa).up();
     if (d.email) ele.ele('email').txt(d.email).up();
   }
@@ -200,8 +228,9 @@ export class NFeXmlBuilder {
     this.appendIcms(imposto, item);
     this.appendIpi(imposto, item);
     this.appendPisCofins(imposto, item);
-    this.appendIbsCbsIs(imposto, item);
+    // Ordem do schema RTC: ICMSUFDest → IS → IBSCBS (os grupos da Reforma são os últimos).
     this.appendIcmsUfDest(imposto, item);
+    this.appendIbsCbsIs(imposto, item);
 
     if (item.infAdProd) det.ele('infAdProd').txt(item.infAdProd).up();
     // Suprime warning de "doc not used"; mantemos a assinatura para futuras adições por item
@@ -303,27 +332,58 @@ export class NFeXmlBuilder {
   }
 
   /**
-   * Grupos IBS/CBS/IS conforme RT 2025.002. Os nomes de tag estão estáveis na NT;
-   * em casos de CST não-tributada (ISENCAO, IMUNIDADE, NAO_INCIDENCIA), só o CST e
-   * o cClassTrib aparecem — o builder respeita a omissão de bases/alíquotas.
+   * Grupos IS e IBS/CBS conforme RT 2025.002 (NT 2025.002 / LC 214/2025).
+   *
+   * Ordem no schema: o grupo `IS` (Imposto Seletivo) precede o `IBSCBS`. Dentro do
+   * IBSCBS, os valores ficam aninhados em `gIBSCBS` com o IBS dividido em parcela
+   * estadual (`gIBSUF`) e municipal (`gIBSMun`), seguidos do total `vIBS` e do `gCBS`:
+   *
+   *   IBSCBS → CST, cClassTrib, gIBSCBS{ vBC, gIBSUF{pIBSUF,vIBSUF},
+   *            gIBSMun{pIBSMun,vIBSMun}, vIBS, gCBS{pCBS,vCBS} }
+   *
+   * Para CST sem tributação (ISENCAO, IMUNIDADE, NAO_INCIDENCIA) o motor não preenche
+   * `baseIbsCbs`, então apenas CST + cClassTrib são emitidos (o grupo de valores some).
    */
   private appendIbsCbsIs(imposto: XMLBuilder, item: NFeItem): void {
-    if (!item.cstIbsCbs) return;
-    const g = imposto.ele('IBSCBS');
-    g.ele('CST').txt(item.cstIbsCbs).up();
-    if (item.cClassTrib) g.ele('cClassTrib').txt(item.cClassTrib).up();
-    if (item.baseIbsCbs) {
-      g.ele('vBC').txt(item.baseIbsCbs).up();
-      if (item.aliqIbs) g.ele('pIBS').txt(item.aliqIbs).up();
-      if (item.valorIbs) g.ele('vIBS').txt(item.valorIbs).up();
-      if (item.aliqCbs) g.ele('pCBS').txt(item.aliqCbs).up();
-      if (item.valorCbs) g.ele('vCBS').txt(item.valorCbs).up();
-    }
+    // IS (Imposto Seletivo) vem antes do IBSCBS na sequência do imposto.
     if (item.cstIs) {
       const isGroup = imposto.ele('IS');
       isGroup.ele('CST').txt(item.cstIs).up();
       if (item.aliqIs) isGroup.ele('pIS').txt(item.aliqIs).up();
       if (item.valorIs) isGroup.ele('vIS').txt(item.valorIs).up();
+    }
+
+    if (!item.cstIbsCbs) return;
+    const g = imposto.ele('IBSCBS');
+    // CST do IBS/CBS é código numérico de 3 dígitos (000, 200, …). O domínio guarda o
+    // enum (TRIBUTACAO_INTEGRAL…); aqui mapeamos para o código oficial exigido pelo XSD.
+    g.ele('CST').txt(CST_IBSCBS_CODIGO[item.cstIbsCbs]).up();
+    // cClassTrib é obrigatório e ENUMERADO no XSD (não é texto livre) — código fora da
+    // tabela oficial dispara cStat 225. Default defensivo: '000001' (tributação integral)
+    // quando a regra do produto não trouxe. ATENÇÃO: o valor real precisa vir do cadastro
+    // do produto com um código válido da tabela cClassTrib (IT 2025.002).
+    g.ele('cClassTrib').txt(item.cClassTrib ?? '000001').up();
+
+    if (item.baseIbsCbs) {
+      const gIbsCbs = g.ele('gIBSCBS');
+      gIbsCbs.ele('vBC').txt(item.baseIbsCbs).up();
+
+      // O IBS divide-se em parcela estadual (gIBSUF) e municipal (gIBSMun). A
+      // CalculadoraIbsCbs ainda apura o IBS de forma agregada (sem rateio UF/Mun), então
+      // alocamos o total na parcela estadual e zeramos a municipal: vIBS = vIBSUF +
+      // vIBSMun permanece coerente e o schema valida. O rateio real entra quando o motor
+      // separar pIBSUF/pIBSMun.
+      const vIbs = item.valorIbs ?? '0.00';
+      const gUf = gIbsCbs.ele('gIBSUF');
+      gUf.ele('pIBSUF').txt(item.aliqIbs ?? '0.0000').up();
+      gUf.ele('vIBSUF').txt(vIbs).up();
+      const gMun = gIbsCbs.ele('gIBSMun');
+      gMun.ele('pIBSMun').txt('0.0000').up();
+      gMun.ele('vIBSMun').txt('0.00').up();
+      gIbsCbs.ele('vIBS').txt(vIbs).up();
+      const gCbs = gIbsCbs.ele('gCBS');
+      gCbs.ele('pCBS').txt(item.aliqCbs ?? '0.0000').up();
+      gCbs.ele('vCBS').txt(item.valorCbs ?? '0.00').up();
     }
   }
 
@@ -355,13 +415,33 @@ export class NFeXmlBuilder {
     icmsTot.ele('vNF').txt(t.valorTotal).up();
     icmsTot.ele('vTotTrib').txt(t.valorTotTrib).up();
 
-    // Totais Reforma (RT 2025.002)
+    // Totais Reforma (RT 2025.002) — grupo IBSCBSTot:
+    //   vBCIBSCBS, gIBS{ gIBSUF{vDif,vDevTrib,vIBSUF}, gIBSMun{vDif,vDevTrib,vIBSMun},
+    //   vIBS, vCredPres, vCredPresCondSus }, gCBS{ vDif,vDevTrib,vCBS,vCredPres,
+    //   vCredPresCondSus }. Coerente com o rateio do item: todo o IBS na parcela UF.
     if (Number(t.valorIbs) > 0 || Number(t.valorCbs) > 0 || Number(t.valorIs) > 0) {
-      const ibsCbs = total.ele('IBSCBSTot');
-      ibsCbs.ele('vBC').txt(t.baseIbsCbs).up();
-      ibsCbs.ele('vIBS').txt(t.valorIbs).up();
-      ibsCbs.ele('vCBS').txt(t.valorCbs).up();
-      if (Number(t.valorIs) > 0) ibsCbs.ele('vIS').txt(t.valorIs).up();
+      const tot = total.ele('IBSCBSTot');
+      tot.ele('vBCIBSCBS').txt(t.baseIbsCbs).up();
+
+      const gIbs = tot.ele('gIBS');
+      const gUf = gIbs.ele('gIBSUF');
+      gUf.ele('vDif').txt('0.00').up();
+      gUf.ele('vDevTrib').txt('0.00').up();
+      gUf.ele('vIBSUF').txt(t.valorIbs).up();
+      const gMun = gIbs.ele('gIBSMun');
+      gMun.ele('vDif').txt('0.00').up();
+      gMun.ele('vDevTrib').txt('0.00').up();
+      gMun.ele('vIBSMun').txt('0.00').up();
+      gIbs.ele('vIBS').txt(t.valorIbs).up();
+      gIbs.ele('vCredPres').txt('0.00').up();
+      gIbs.ele('vCredPresCondSus').txt('0.00').up();
+
+      const gCbs = tot.ele('gCBS');
+      gCbs.ele('vDif').txt('0.00').up();
+      gCbs.ele('vDevTrib').txt('0.00').up();
+      gCbs.ele('vCBS').txt(t.valorCbs).up();
+      gCbs.ele('vCredPres').txt('0.00').up();
+      gCbs.ele('vCredPresCondSus').txt('0.00').up();
     }
   }
 
@@ -436,6 +516,22 @@ const CRT_CODIGO: Record<CodigoRegimeTributario, string> = {
   [CodigoRegimeTributario.MEI]: '4',
 };
 
+/**
+ * CST do IBS/CBS → código numérico de 3 dígitos exigido pelo XSD (NT 2025.002).
+ * O domínio modela o CST como enum nomeado; o XML precisa do código da tabela oficial.
+ */
+const CST_IBSCBS_CODIGO: Record<CstIbsCbs, string> = {
+  [CstIbsCbs.TRIBUTACAO_INTEGRAL]: '000',
+  [CstIbsCbs.REDUCAO_ALIQUOTA]: '200',
+  [CstIbsCbs.REDUCAO_BASE_CALCULO]: '210',
+  [CstIbsCbs.DIFERIMENTO]: '410',
+  [CstIbsCbs.SUSPENSAO]: '510',
+  [CstIbsCbs.ISENCAO]: '610',
+  [CstIbsCbs.IMUNIDADE]: '620',
+  [CstIbsCbs.NAO_INCIDENCIA]: '630',
+  [CstIbsCbs.CREDITO_PRESUMIDO]: '800',
+};
+
 const IND_IE_CODIGO: Record<string, string> = {
   CONTRIBUINTE: '1',
   ISENTO: '2',
@@ -448,11 +544,43 @@ function onlyDigits(value: string): string {
   return value.replace(/\D/g, '');
 }
 
+/**
+ * `indIntermed` é obrigatório nos cenários não-presenciais (NT 2020.006). Para
+ * presencial dentro do estabelecimento (1) e "não se aplica" (0), o campo NÃO
+ * pode ser enviado — o schema impede.
+ */
+function requiresIndIntermed(indPres: IndicadorPresenca | undefined): boolean {
+  if (indPres === undefined) return false;
+  return [
+    IndicadorPresenca.INTERNET,
+    IndicadorPresenca.TELEATENDIMENTO,
+    IndicadorPresenca.ENTREGA_EM_DOMICILIO,
+    IndicadorPresenca.PRESENCIAL_FORA_ESTABELECIMENTO,
+    IndicadorPresenca.OUTROS,
+  ].includes(indPres);
+}
+
 function toISO(d: Date): string {
-  // dhEmi exige formato ISO 8601 com timezone — Date.toISOString() devolve UTC com Z.
-  // Para preservar fuso local (-03:00 etc.), o caller deve montar a Date com o offset
-  // desejado; aqui só serializamos.
-  return d.toISOString();
+  // Schema NF-e 4.00 (TData) exige YYYY-MM-DDTHH:MM:SS±HH:MM — SEM milissegundos e
+  // SEM o sufixo "Z" do UTC. Date.toISOString() devolve "2026-05-28T12:03:53.098Z",
+  // o que dispara cStat 225 (Falha no Schema XML).
+  //
+  // Estratégia: serializa em horário do fuso de São Paulo (UTC−03:00) — Brasil não
+  // observa horário de verão desde 2019, então o offset é constante. Se a operação
+  // precisar de outro fuso (Acre etc.), trocar a constante; suporte multi-fuso fica
+  // para quando houver demanda de cliente.
+  const OFFSET_MIN = -180; // UTC−03:00
+  const local = new Date(d.getTime() + OFFSET_MIN * 60_000);
+  const yyyy = local.getUTCFullYear();
+  const mm = String(local.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(local.getUTCDate()).padStart(2, '0');
+  const hh = String(local.getUTCHours()).padStart(2, '0');
+  const mi = String(local.getUTCMinutes()).padStart(2, '0');
+  const ss = String(local.getUTCSeconds()).padStart(2, '0');
+  const sign = OFFSET_MIN <= 0 ? '-' : '+';
+  const offH = String(Math.floor(Math.abs(OFFSET_MIN) / 60)).padStart(2, '0');
+  const offM = String(Math.abs(OFFSET_MIN) % 60).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}${sign}${offH}:${offM}`;
 }
 
 /**

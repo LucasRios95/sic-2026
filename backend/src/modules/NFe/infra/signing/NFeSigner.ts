@@ -3,14 +3,22 @@ import * as forge from 'node-forge';
 
 /**
  * Assinatura XML-DSig da NF-e — ponto mais sensível tecnicamente da integração SEFAZ.
- * Uma falha na canonicalização produz rejeição em massa (cStat 215 / 280).
+ * Uma falha na canonicalização produz rejeição em massa (cStat 215 / 280 / 225).
  *
- * Padrão da NF-e (MOC item 9):
- *  - Canonicalização: Exclusive XML Canonicalization (C14N) — http://www.w3.org/2001/10/xml-exc-c14n#
- *  - Algoritmo de assinatura: RSA-SHA256 — http://www.w3.org/2001/04/xmldsig-more#rsa-sha256
- *  - Algoritmo de digest: SHA-256 — http://www.w3.org/2001/04/xmlenc#sha256
- *  - Reference XPath: o elemento `infNFe` (ou `infEvento` em eventos), referenciado por Id
- *  - Transforms: enveloped-signature + C14N exclusiva
+ * Algoritmos: o XSD oficial da NF-e 4.00 (PL_009/PL_010) trava por `fixed value` quatro
+ * URIs dentro do bloco `<Signature>` — SHA-1 + C14N canonical (não a exclusive C14N).
+ * Embora o MOC textualmente "permita" SHA-256, o schema XSD que a SEFAZ-SP usa para
+ * validar o lote NÃO foi atualizado. Enviar com SHA-256 dispara cStat 225 ("Falha no
+ * Schema XML do lote de NFe"). Por isso usamos os quatro valores travados:
+ *
+ *  - Canonicalização: http://www.w3.org/TR/2001/REC-xml-c14n-20010315
+ *  - SignatureMethod: http://www.w3.org/2000/09/xmldsig#rsa-sha1
+ *  - DigestMethod:    http://www.w3.org/2000/09/xmldsig#sha1
+ *  - Transforms:      enveloped-signature + REC-xml-c14n-20010315
+ *
+ * SHA-1 é fraco criptograficamente, mas a segurança da NF-e vem do mTLS + ICP-Brasil
+ * na transmissão, não da função hash da assinatura interna — o XML autorizado também
+ * só é aceito quando o certificado emissor é da cadeia ICP-Brasil válida.
  *
  * Entrada do certificado:
  *  - PFX (PKCS#12) + senha. O cofre (ICertificateVault) devolve esses dois — esta classe
@@ -39,16 +47,16 @@ export class NFeSigner {
     const sig = new SignedXml({
       privateKey: privateKeyPem,
       publicCert: certificatePem,
-      signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
-      canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+      signatureAlgorithm: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1',
+      canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
     });
 
     sig.addReference({
       xpath: `//*[@Id='${referenceId}']`,
-      digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
+      digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
       transforms: [
         'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
-        'http://www.w3.org/2001/10/xml-exc-c14n#',
+        'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
       ],
     });
 

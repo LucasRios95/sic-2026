@@ -60,3 +60,13 @@ export enum IndicadorPresenca {
   PRESENCIAL_FORA_ESTABELECIMENTO = 5,
   OUTROS = 9,
 }
+
+/**
+ * Indicador de intermediador (indIntermed) — NT 2020.006. Obrigatório quando
+ * `indPres ∈ {2,3,4,5,9}` (operação não-presencial). Quando vendido em site/plataforma
+ * própria, vai 0; quando o canal é marketplace de terceiro, vai 1.
+ */
+export enum IndicadorIntermediador {
+  SEM_INTERMEDIADOR = 0,
+  MARKETPLACE_TERCEIRO = 1,
+}

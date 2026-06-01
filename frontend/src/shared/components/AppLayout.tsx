@@ -21,6 +21,7 @@ import { useState } from 'react';
 
 import { logout } from '@/features/auth/auth-api';
 import { useAuthStore } from '@/features/auth/auth-store';
+import { CompanySwitcher } from '@/shared/components/CompanySwitcher';
 import { Logo } from '@/shared/components/Logo';
 import { cn } from '@/lib/utils';
 
@@ -229,7 +230,9 @@ export function AppLayout(): React.ReactElement {
             {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
 
-          <div className="flex-1" />
+          <div className="flex-1 px-2 sm:px-4">
+            <CompanySwitcher />
+          </div>
 
           <div className="flex items-center gap-3">
             <span className="hidden sm:inline text-xs text-muted-foreground">
