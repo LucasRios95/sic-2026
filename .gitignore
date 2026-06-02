@@ -46,3 +46,6 @@ tmp/
 certs/*.pem
 certs/*.crt
 certs/*.der
+
+# Artefatos de build / releases (nunca commitar - excedem limite do GitHub)
+releases/
