@@ -49,3 +49,7 @@ certs/*.der
 
 # Artefatos de build / releases (nunca commitar - excedem limite do GitHub)
 releases/
+
+# Dumps de banco de dados (nao versionar - podem conter dados reais)
+docs/Dump*.sql
+*.dump
