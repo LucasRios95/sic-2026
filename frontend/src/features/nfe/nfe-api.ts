@@ -83,6 +83,13 @@ export interface EmitirNFeItemPayload {
   quantidade: string;
   valorUnitario: string;
   valorDesconto?: string;
+  /**
+   * Override do código de ICMS do item, conforme o regime da empresa: `csosnIcms` (3 díg.)
+   * para Simples Nacional, `cstIcms` (2 díg.) para Regime Normal. Omitido = usa a regra do
+   * produto. O backend valida a coerência com o regime e recalcula os valores.
+   */
+  cstIcms?: string;
+  csosnIcms?: string;
 }
 
 export type TipoOperacao = 'ENTRADA' | 'SAIDA';

@@ -144,12 +144,16 @@ export class NFeXmlBuilder {
     const e = doc.emitente;
     const ele = parent.ele('emit');
     ele.ele('CNPJ').txt(onlyDigits(e.cnpj)).up();
-    ele.ele('xNome').txt(e.razaoSocial).up();
-    if (e.nomeFantasia) ele.ele('xFant').txt(e.nomeFantasia).up();
+    ele.ele('xNome').txt(clean(e.razaoSocial)).up();
+    if (e.nomeFantasia) ele.ele('xFant').txt(clean(e.nomeFantasia)).up();
     this.appendEndereco(ele, 'enderEmit', e.endereco);
     if (e.ie) ele.ele('IE').txt(e.ie).up();
-    if (e.im) ele.ele('IM').txt(e.im).up();
-    if (e.cnae) ele.ele('CNAE').txt(e.cnae).up();
+    // No schema, CNAE está aninhado num grupo que EXIGE IM antes (sequence{ IM, CNAE? }).
+    // Emitir CNAE sem IM dispara cStat 225 ("CNAE não esperado"). Só emite CNAE com IM.
+    if (e.im) {
+      ele.ele('IM').txt(e.im).up();
+      if (e.cnae) ele.ele('CNAE').txt(e.cnae).up();
+    }
     ele.ele('CRT').txt(CRT_CODIGO[e.crt]).up();
   }
 
@@ -170,7 +174,7 @@ export class NFeXmlBuilder {
     const xNomeFinal =
       doc.identificacao.ambiente === AmbienteSefaz.HOMOLOGACAO
         ? 'NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL'
-        : d.nome;
+        : clean(d.nome);
     ele.ele('xNome').txt(xNomeFinal).up();
     this.appendEndereco(ele, 'enderDest', d.endereco);
     // indIEDest: SP/RJ/MG e outras SEFAZes rejeitam o código 2 (ISENTO) com cStat 805 —
@@ -188,12 +192,14 @@ export class NFeXmlBuilder {
 
   private appendEndereco(parent: XMLBuilder, tag: string, end: NFeEndereco): void {
     const ele = parent.ele(tag);
-    ele.ele('xLgr').txt(end.logradouro).up();
-    ele.ele('nro').txt(end.numero).up();
-    if (end.complemento) ele.ele('xCpl').txt(end.complemento).up();
-    ele.ele('xBairro').txt(end.bairro).up();
+    // clean(): TString do schema não aceita espaço no início/fim (facet 'pattern') —
+    // endereço com espaço sobrando (ex.: "Avenida X ") dispara cStat 225.
+    ele.ele('xLgr').txt(clean(end.logradouro)).up();
+    ele.ele('nro').txt(clean(end.numero)).up();
+    if (end.complemento) ele.ele('xCpl').txt(clean(end.complemento)).up();
+    ele.ele('xBairro').txt(clean(end.bairro)).up();
     ele.ele('cMun').txt(end.codigoMunicipioIbge).up();
-    ele.ele('xMun').txt(end.municipio).up();
+    ele.ele('xMun').txt(clean(end.municipio)).up();
     ele.ele('UF').txt(end.uf).up();
     ele.ele('CEP').txt(end.cep).up();
     ele.ele('cPais').txt(end.codigoPais ?? '1058').up();
@@ -243,14 +249,37 @@ export class NFeXmlBuilder {
     const icms = imposto.ele('ICMS');
 
     if (item.csosnIcms) {
-      // Simples Nacional — usa CSOSN. Grupo varia (ICMSSN101, ICMSSN102, ICMSSN201, etc.).
-      const groupName = `ICMSSN${item.csosnIcms}`;
-      const group = icms.ele(groupName);
+      // Simples Nacional — usa CSOSN. ATENÇÃO: o schema NÃO tem um elemento por CSOSN;
+      // vários CSOSN compartilham o mesmo grupo (ex.: 102/103/300/400 → ICMSSN102). Usar
+      // `ICMSSN${csosn}` direto gera elementos inexistentes (ex.: ICMSSN400) e dispara 225.
+      const csosn = item.csosnIcms;
+      const group = icms.ele(icmsSnGroupName(csosn));
       group.ele('orig').txt(String(item.origem)).up();
-      group.ele('CSOSN').txt(item.csosnIcms).up();
-      if (item.aliqIcms) {
-        group.ele('pCredSN').txt(item.aliqIcms).up();
-        if (item.baseIcms) group.ele('vCredICMSSN').txt(item.valorIcms ?? '0.00').up();
+      group.ele('CSOSN').txt(csosn).up();
+
+      // Grupos com ST (201/202/203): campos de ST quando informados (ordem do schema).
+      if (['201', '202', '203'].includes(csosn) && item.baseIcmsST) {
+        if (item.modBCST !== undefined) group.ele('modBCST').txt(String(item.modBCST)).up();
+        if (item.pMVAST) group.ele('pMVAST').txt(item.pMVAST).up();
+        group.ele('vBCST').txt(item.baseIcmsST).up();
+        if (item.aliqIcmsST) group.ele('pICMSST').txt(item.aliqIcmsST).up();
+        if (item.valorIcmsST) group.ele('vICMSST').txt(item.valorIcmsST).up();
+      }
+
+      // ICMSSN900 pode carregar ICMS próprio (campos opcionais).
+      if (csosn === '900' && item.baseIcms && item.aliqIcms) {
+        if (item.modBC !== undefined) group.ele('modBC').txt(String(item.modBC)).up();
+        group.ele('vBC').txt(item.baseIcms).up();
+        if (item.pRedBC) group.ele('pRedBC').txt(item.pRedBC).up();
+        group.ele('pICMS').txt(item.aliqIcms).up();
+        group.ele('vICMS').txt(item.valorIcms ?? '0.00').up();
+      }
+
+      // Crédito do Simples: obrigatório em 101/201; opcional em 900 (quando há alíquota).
+      // ICMSSN102 (102/103/300/400) e ICMSSN500 NÃO têm crédito.
+      if (csosn === '101' || csosn === '201' || (csosn === '900' && item.aliqIcms)) {
+        group.ele('pCredSN').txt(item.aliqIcms ?? '0.0000').up();
+        group.ele('vCredICMSSN').txt(item.valorIcms ?? '0.00').up();
       }
       return;
     }
@@ -260,8 +289,13 @@ export class NFeXmlBuilder {
     const group = icms.ele(groupName);
     group.ele('orig').txt(String(item.origem)).up();
     group.ele('CST').txt(item.cstIcms!).up();
-    if (item.modBC !== undefined) group.ele('modBC').txt(String(item.modBC)).up();
-    if (item.baseIcms) group.ele('vBC').txt(item.baseIcms).up();
+    // modBC é OBRIGATÓRIO no schema para os CST com base própria (00,10,20,51,70,90) e
+    // deve preceder vBC. Omitir dispara cStat 225 ("Expected is modBC"). Quando a regra
+    // não informa, default 3 = Valor da operação (modalidade mais comum).
+    if (item.baseIcms) {
+      group.ele('modBC').txt(String(item.modBC ?? 3)).up();
+      group.ele('vBC').txt(item.baseIcms).up();
+    }
     if (item.pRedBC) group.ele('pRedBC').txt(item.pRedBC).up();
     if (item.aliqIcms) group.ele('pICMS').txt(item.aliqIcms).up();
     if (item.valorIcms) group.ele('vICMS').txt(item.valorIcms).up();
@@ -312,22 +346,32 @@ export class NFeXmlBuilder {
     }
   }
 
+  /**
+   * Grupos PIS e COFINS — OBRIGATÓRIOS por item (a ausência dispara cStat 745 "NF-e sem
+   * grupo do PIS" / equivalente do COFINS). Quando o produto não tem CST configurado na
+   * regra, emitimos CST 49 (Outras Operações de Saída) com valores zerados — padrão correto
+   * para Simples Nacional (PIS/COFINS recolhidos no DAS, sem destaque na nota) e fallback
+   * seguro. Produtos do Regime Normal com PIS/COFINS efetivo DEVEM configurar o CST/alíquota
+   * reais na regra tributária — caso contrário sairão zerados.
+   */
   private appendPisCofins(imposto: XMLBuilder, item: NFeItem): void {
-    if (item.cstPis) {
-      const pis = imposto.ele('PIS');
-      const group = pis.ele(pisGroupName(item.cstPis));
-      group.ele('CST').txt(item.cstPis).up();
-      if (item.basePis) group.ele('vBC').txt(item.basePis).up();
-      if (item.aliqPis) group.ele('pPIS').txt(item.aliqPis).up();
-      if (item.valorPis) group.ele('vPIS').txt(item.valorPis).up();
+    const cstPis = item.cstPis ?? '49';
+    const pis = imposto.ele('PIS').ele(pisGroupName(cstPis));
+    pis.ele('CST').txt(cstPis).up();
+    if (pisGroupName(cstPis) !== 'PISNT') {
+      // PISAliq/PISOutr exigem vBC + pPIS + vPIS. Default zero quando não calculado.
+      pis.ele('vBC').txt(item.basePis ?? '0.00').up();
+      pis.ele('pPIS').txt(item.aliqPis ?? '0.0000').up();
+      pis.ele('vPIS').txt(item.valorPis ?? '0.00').up();
     }
-    if (item.cstCofins) {
-      const cofins = imposto.ele('COFINS');
-      const group = cofins.ele(cofinsGroupName(item.cstCofins));
-      group.ele('CST').txt(item.cstCofins).up();
-      if (item.baseCofins) group.ele('vBC').txt(item.baseCofins).up();
-      if (item.aliqCofins) group.ele('pCOFINS').txt(item.aliqCofins).up();
-      if (item.valorCofins) group.ele('vCOFINS').txt(item.valorCofins).up();
+
+    const cstCofins = item.cstCofins ?? '49';
+    const cofins = imposto.ele('COFINS').ele(cofinsGroupName(cstCofins));
+    cofins.ele('CST').txt(cstCofins).up();
+    if (cofinsGroupName(cstCofins) !== 'COFINSNT') {
+      cofins.ele('vBC').txt(item.baseCofins ?? '0.00').up();
+      cofins.ele('pCOFINS').txt(item.aliqCofins ?? '0.0000').up();
+      cofins.ele('vCOFINS').txt(item.valorCofins ?? '0.00').up();
     }
   }
 
@@ -545,6 +589,15 @@ function onlyDigits(value: string): string {
 }
 
 /**
+ * Normaliza texto livre para o padrão TString do schema: o pattern oficial não aceita
+ * espaço no início nem no fim. Faz trim e colapsa espaços internos repetidos. Sem isso,
+ * um endereço/nome com espaço sobrando dispara cStat 225 (facet 'pattern').
+ */
+function clean(value: string): string {
+  return value.trim().replace(/\s+/g, ' ');
+}
+
+/**
  * `indIntermed` é obrigatório nos cenários não-presenciais (NT 2020.006). Para
  * presencial dentro do estabelecimento (1) e "não se aplica" (0), o campo NÃO
  * pode ser enviado — o schema impede.
@@ -581,6 +634,21 @@ function toISO(d: Date): string {
   const offH = String(Math.floor(Math.abs(OFFSET_MIN) / 60)).padStart(2, '0');
   const offM = String(Math.abs(OFFSET_MIN) % 60).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}${sign}${offH}:${offM}`;
+}
+
+/**
+ * Mapeia o CSOSN para o nome do GRUPO no schema. O leiaute não tem um elemento por CSOSN —
+ * vários códigos compartilham o mesmo grupo. Errar isso (ex.: `ICMSSN400`) dispara cStat 225.
+ *  - 101 → ICMSSN101 | 102/103/300/400 → ICMSSN102 | 201 → ICMSSN201
+ *  - 202/203 → ICMSSN202 | 500 → ICMSSN500 | 900 (e demais) → ICMSSN900
+ */
+function icmsSnGroupName(csosn: string): string {
+  if (csosn === '101') return 'ICMSSN101';
+  if (['102', '103', '300', '400'].includes(csosn)) return 'ICMSSN102';
+  if (csosn === '201') return 'ICMSSN201';
+  if (['202', '203'].includes(csosn)) return 'ICMSSN202';
+  if (csosn === '500') return 'ICMSSN500';
+  return 'ICMSSN900';
 }
 
 /**

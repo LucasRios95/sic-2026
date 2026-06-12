@@ -47,6 +47,7 @@ import { NFeEventoRepository } from '@modules/NFe/infra/typeorm/repositories/NFe
 import { NFeRepository } from '@modules/NFe/infra/typeorm/repositories/NFeRepository';
 import { NumberingSeriesRepository } from '@modules/NFe/infra/typeorm/repositories/NumberingSeriesRepository';
 import { SefazTransmissionRepository } from '@modules/NFe/infra/typeorm/repositories/SefazTransmissionRepository';
+import { NFeSchemaValidator } from '@modules/NFe/infra/validation/NFeSchemaValidator';
 import { DfeManifestationRepository } from '@modules/NFeRecepcao/infra/typeorm/repositories/DfeManifestationRepository';
 import { NsuCursorRepository } from '@modules/NFeRecepcao/infra/typeorm/repositories/NsuCursorRepository';
 import { ReceivedDocumentRepository } from '@modules/NFeRecepcao/infra/typeorm/repositories/ReceivedDocumentRepository';
@@ -168,6 +169,8 @@ export function registerDependencies(): void {
     'NumberingSeriesRepository',
     NumberingSeriesRepository,
   );
+  // Validador XSD singleton — compila o schema oficial uma vez e cacheia pelo processo.
+  container.registerSingleton(NFeSchemaValidator);
 
   // --- NF-e Recepção (Fase 1b — EP-10 + EP-11) ---
   container.registerSingleton<INsuCursorRepository>('NsuCursorRepository', NsuCursorRepository);

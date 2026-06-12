@@ -11,4 +11,5 @@ export interface IRoleRepository {
   create(data: CreateRoleData): Promise<Role>;
   findById(id: string): Promise<Role | null>;
   findByName(tenantId: string, name: string): Promise<Role | null>;
+  listByTenant(tenantId: string): Promise<Role[]>;
 }

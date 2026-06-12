@@ -2,7 +2,9 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAuthStore } from '@/features/auth/auth-store';
 import { listCertificates } from '@/features/certificates/certificates-api';
+import { listCompanies } from '@/features/companies/companies-api';
 import { getCustomer, listCustomers } from '@/features/customers/customers-api';
 import {
   emitirNFe,
@@ -38,6 +40,8 @@ interface ItemRow {
   cfop: string;
   quantidade: string;
   valorUnitario: string;
+  /** Override do código de ICMS (CSOSN p/ Simples, CST p/ Normal). Vazio = usa a regra do produto. */
+  icmsCodigo: string;
 }
 
 let nextRowId = 1;
@@ -47,7 +51,37 @@ const makeRow = (): ItemRow => ({
   cfop: '5102',
   quantidade: '1',
   valorUnitario: '0.00',
+  icmsCodigo: '',
 });
+
+/** CSOSN (Simples Nacional) — código + descrição curta. */
+const CSOSN_OPCOES: ReadonlyArray<[string, string]> = [
+  ['101', '101 — Tributada com crédito'],
+  ['102', '102 — Tributada sem crédito'],
+  ['103', '103 — Isenção (faixa de receita)'],
+  ['201', '201 — Com crédito e com ST'],
+  ['202', '202 — Sem crédito e com ST'],
+  ['203', '203 — Isenção e com ST'],
+  ['300', '300 — Imune'],
+  ['400', '400 — Não tributada'],
+  ['500', '500 — ICMS cobrado antes por ST'],
+  ['900', '900 — Outros'],
+];
+
+/** CST de ICMS (Regime Normal) — código + descrição curta. */
+const CST_ICMS_OPCOES: ReadonlyArray<[string, string]> = [
+  ['00', '00 — Tributada integralmente'],
+  ['10', '10 — Tributada e com ST'],
+  ['20', '20 — Com redução de base'],
+  ['30', '30 — Isenta/não trib. e com ST'],
+  ['40', '40 — Isenta'],
+  ['41', '41 — Não tributada'],
+  ['50', '50 — Suspensão'],
+  ['51', '51 — Diferimento'],
+  ['60', '60 — ICMS cobrado antes por ST'],
+  ['70', '70 — Redução de base e com ST'],
+  ['90', '90 — Outras'],
+];
 
 const FINALIDADE_LABEL: Record<FinalidadeNFe, string> = {
   NORMAL: 'Normal',
@@ -71,6 +105,16 @@ export function NFeNewPage(): React.ReactElement {
   const navigate = useNavigate();
   // Quando aberto via "Reemitir" em uma NF-e existente, o id vem em `?reissueFrom=`.
   const { reissueFrom } = useSearch({ from: '/app-layout/fiscal/nfe/new' });
+
+  // Regime da empresa emitente decide o código de ICMS editável por item:
+  // Simples Nacional (CRT 1/2/4) usa CSOSN; Regime Normal (CRT 3) usa CST.
+  const selectedCompanyId = useAuthStore((s) => s.selectedCompanyId);
+  const companiesQuery = useQuery({ queryKey: ['companies'], queryFn: listCompanies });
+  const empresaCrt = companiesQuery.data?.find((c) => c.id === selectedCompanyId)?.crt;
+  const isSimples = empresaCrt ? empresaCrt !== 'REGIME_NORMAL' : false;
+  const icmsOpcoes = isSimples ? CSOSN_OPCOES : CST_ICMS_OPCOES;
+  const icmsLabel = isSimples ? 'CSOSN' : 'CST';
+
   const [customerId, setCustomerId] = useState('');
   const [serie, setSerie] = useState(1);
   // Campo numero SEMPRE preenchido pelo faturista. Mostramos o "ultimo usado"
@@ -256,6 +300,7 @@ export function NFeNewPage(): React.ReactElement {
           cfop: it.cfop,
           quantidade: it.quantidadeComercial,
           valorUnitario: it.valorUnitario,
+          icmsCodigo: '', // reemissão usa o código da regra vigente do produto
         })),
       );
     }
@@ -359,6 +404,12 @@ export function NFeNewPage(): React.ReactElement {
             unidadeComercial: productCacheRef.current[it.productId]?.unidadeComercial ?? 'UN',
             quantidade: it.quantidade,
             valorUnitario: it.valorUnitario,
+            // Override do código de ICMS, conforme o regime da empresa. Vazio = usa a regra.
+            ...(it.icmsCodigo
+              ? isSimples
+                ? { csosnIcms: it.icmsCodigo }
+                : { cstIcms: it.icmsCodigo }
+              : {}),
           })),
         pagamentos: [{ meio: pagamentoMeio, valor: valorTotal }],
         certificateVaultRef: certificateVaultRef || undefined,
@@ -659,7 +710,7 @@ export function NFeNewPage(): React.ReactElement {
           {items.map((row, idx) => (
             <div
               key={row.id}
-              className="grid grid-cols-[1fr_80px_80px_120px_40px] gap-2 items-end border-b border-border pb-2 last:border-0"
+              className="grid grid-cols-[1fr_70px_70px_110px_150px_40px] gap-2 items-end border-b border-border pb-2 last:border-0"
             >
               <div className="space-y-1">
                 <Label className="text-xs">Produto #{idx + 1}</Label>
@@ -693,6 +744,21 @@ export function NFeNewPage(): React.ReactElement {
                   value={row.valorUnitario}
                   onChange={(e) => updateItem(row.id, { valorUnitario: e.target.value })}
                 />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">{icmsLabel}</Label>
+                <Select
+                  value={row.icmsCodigo}
+                  onChange={(e) => updateItem(row.id, { icmsCodigo: e.target.value })}
+                  title={`${icmsLabel} de ICMS — vazio usa o código da regra do produto`}
+                >
+                  <option value="">— padrão do produto —</option>
+                  {icmsOpcoes.map(([cod, label]) => (
+                    <option key={cod} value={cod}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
               </div>
               <Button variant="ghost" onClick={() => removeItem(row.id)} disabled={items.length <= 1}>
                 ✕

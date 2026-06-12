@@ -54,6 +54,14 @@ const envSchema = z.object({
   STORAGE_DRIVER: z.enum(['filesystem', 's3']).default('filesystem'),
   STORAGE_PATH: z.string().default('./tmp/docs'),
 
+  // --- Validação XSD da NF-e (antes de assinar/transmitir) ---
+  // block: XML inválido vira rejeição local, sem ir à SEFAZ (default).
+  // warn:  loga os erros mas transmite mesmo assim (observação).
+  // off:   desliga a validação. Útil se o XSD local ficar atrás do schema de produção.
+  NFE_XSD_VALIDATION: z.enum(['block', 'warn', 'off']).default('block'),
+  // Override do caminho do XSD de entrada (nfe_v4.00.xsd). Vazio = pacote vendorizado padrão.
+  NFE_SCHEMA_PATH: z.string().optional().default(''),
+
   // --- E-mail (SMTP) ---
   MAIL_HOST: z.string().optional().default(''),
   MAIL_PORT: z.coerce.number().int().positive().default(587),

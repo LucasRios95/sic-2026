@@ -1,3 +1,8 @@
+// Polyfill de metadados para os decorators do tsyringe (@injectable/@inject). Sem isto,
+// qualquer teste que importe um use case decorado falha ao carregar com
+// "tsyringe requires a reflect polyfill". Precisa ser o PRIMEIRO import.
+import 'reflect-metadata';
+
 // Setup mínimo para testes unitários que importam módulos que dependem de env.
 // O Vitest carrega este arquivo via vitest.config (setupFiles) — mas como mantemos
 // os testes simples e auto-suficientes, definimos as variáveis aqui também.

@@ -14,5 +14,8 @@ export interface UserPermissionContext {
 
 export interface IUserRoleRepository {
   assign(data: AssignUserRoleData): Promise<UserRole>;
+  revoke(data: AssignUserRoleData): Promise<void>;
+  /** Vínculos do usuário, com role e company carregados (company nulo = papel global). */
+  findByUser(userId: string): Promise<UserRole[]>;
   loadContextForUser(userId: string): Promise<UserPermissionContext>;
 }

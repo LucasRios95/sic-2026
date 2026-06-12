@@ -26,6 +26,19 @@ export class UserRoleRepository implements IUserRoleRepository {
     return this.repo.save(created);
   }
 
+  async revoke(data: AssignUserRoleData): Promise<void> {
+    const companyId = data.companyId ?? GLOBAL_COMPANY_ID;
+    await this.repo.delete({ userId: data.userId, roleId: data.roleId, companyId });
+  }
+
+  async findByUser(userId: string): Promise<UserRole[]> {
+    return this.repo.find({
+      where: { userId },
+      relations: { role: true, company: true },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
   /**
    * Carrega papéis, permissões e empresas acessíveis em uma única consulta agregada.
    * Resultado é cacheável por requisição (não persistido) e cabe no payload do JWT.

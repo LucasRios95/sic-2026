@@ -32,11 +32,17 @@ COPY package.json package-lock.json* ./
 
 # `--include=dev` porque tsx vive nas devDependencies. Em prod real seguro
 # (apos limpar erros TS), trocar por multi-stage com `npm ci --omit=dev`.
-RUN if [ -f package-lock.json ]; then \
+#
+# build-base + python3: toolchain p/ node-gyp compilar libxmljs2 (modulo nativo de
+# validacao XSD). Virtual package removido apos o install -- o .node compilado
+# persiste, mantendo a imagem enxuta.
+RUN apk add --no-cache --virtual .build-deps build-base python3 && \
+    (if [ -f package-lock.json ]; then \
       npm ci --include=dev; \
     else \
       npm install --include=dev --legacy-peer-deps; \
-    fi
+    fi) && \
+    apk del .build-deps
 
 COPY . .
 

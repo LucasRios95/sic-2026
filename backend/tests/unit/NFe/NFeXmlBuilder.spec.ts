@@ -12,7 +12,8 @@ import {
   TipoOperacao,
 } from '@modules/NFe/domain/nfe-enums';
 import { NFeXmlBuilder } from '@modules/NFe/domain/NFeXmlBuilder';
-import { CstIbsCbs, IndicadorIE, TipoPessoa } from '@shared/types/fiscal-enums';
+import { NFeSchemaValidator } from '@modules/NFe/infra/validation/NFeSchemaValidator';
+import { CstIbsCbs, IndicadorIE, IndicadorPresenca, TipoPessoa } from '@shared/types/fiscal-enums';
 
 function makeDoc(): NFeDocument {
   const chave = ChaveAcesso.build({
@@ -40,6 +41,7 @@ function makeDoc(): NFeDocument {
       dhEmissao: new Date('2026-06-15T12:00:00Z'),
       codigoNumerico: '12345678',
       idDest: 1,
+      indicadorPresenca: IndicadorPresenca.PRESENCIAL,
     },
     emitente: {
       cnpj: '11222333000181',
@@ -170,6 +172,61 @@ describe('NFeXmlBuilder', () => {
     expect(xml).toContain('<CRT>3</CRT>');
   });
 
+  // Guarda de regressão estrutural: o XML do builder (ainda NÃO assinado) deve validar
+  // contra o XSD oficial — exceto pela <Signature>, que é obrigatória no schema mas só é
+  // adicionada na etapa de assinatura. Qualquer outro erro indica regressão de leiaute
+  // (foi assim que CNAE/modBC/indPres apareceram). A validação do XML assinado ocorre no
+  // EmitirNFeUseCase antes de transmitir.
+  it('produz XML estruturalmente válido (único pendente é a Signature, adicionada na assinatura)', () => {
+    const xml = builder.build(makeDoc());
+    const errors = new NFeSchemaValidator().validate(xml);
+    const naoSignature = errors.filter((e) => !e.message.includes('Signature'));
+    expect(naoSignature).toEqual([]);
+  });
+
+  it('emite PIS/COFINS default (CST 49 zerado) quando o produto não tem CST configurado', () => {
+    const doc = makeDoc();
+    const item = doc.itens[0] as Record<string, unknown>;
+    for (const k of [
+      'cstPis', 'basePis', 'aliqPis', 'valorPis',
+      'cstCofins', 'baseCofins', 'aliqCofins', 'valorCofins',
+    ]) {
+      delete item[k];
+    }
+    const xml = builder.build(doc);
+    expect(xml).toContain('<PIS><PISOutr><CST>49</CST><vBC>0.00</vBC><pPIS>0.0000</pPIS><vPIS>0.00</vPIS></PISOutr></PIS>');
+    expect(xml).toContain('<COFINS><COFINSOutr><CST>49</CST><vBC>0.00</vBC><pCOFINS>0.0000</pCOFINS><vCOFINS>0.00</vCOFINS></COFINSOutr></COFINS>');
+    // E o XML segue válido no XSD (menos a Signature, adicionada na assinatura).
+    const errs = new NFeSchemaValidator().validate(xml).filter((e) => !e.message.includes('Signature'));
+    expect(errs).toEqual([]);
+  });
+
+  it('mapeia CSOSN ao grupo correto do schema (400 → ICMSSN102) e valida no XSD', () => {
+    const doc = makeDoc();
+    const item = doc.itens[0] as Record<string, unknown>;
+    delete item.cstIcms;
+    item.csosnIcms = '400';
+    item.aliqIcms = undefined; // CSOSN 400 não tem ICMS próprio nem crédito
+    const xml = builder.build(doc);
+    expect(xml).toContain('<ICMS><ICMSSN102><orig>0</orig><CSOSN>400</CSOSN></ICMSSN102></ICMS>');
+    expect(xml).not.toContain('ICMSSN400'); // elemento inexistente no schema
+    const errs = new NFeSchemaValidator().validate(xml).filter((e) => !e.message.includes('Signature'));
+    expect(errs).toEqual([]);
+  });
+
+  it('CSOSN 101 usa ICMSSN101 com pCredSN/vCredICMSSN e valida no XSD', () => {
+    const doc = makeDoc();
+    const item = doc.itens[0] as Record<string, unknown>;
+    delete item.cstIcms;
+    item.csosnIcms = '101';
+    item.aliqIcms = '2.5000';
+    item.valorIcms = '2.50';
+    const xml = builder.build(doc);
+    expect(xml).toContain('<ICMSSN101><orig>0</orig><CSOSN>101</CSOSN><pCredSN>2.5000</pCredSN><vCredICMSSN>2.50</vCredICMSSN></ICMSSN101>');
+    const errs = new NFeSchemaValidator().validate(xml).filter((e) => !e.message.includes('Signature'));
+    expect(errs).toEqual([]);
+  });
+
   it('renderiza grupo ICMS00 com base, alíquota e valor', () => {
     const xml = builder.build(makeDoc());
     expect(xml).toContain('<ICMS00>');
@@ -212,7 +269,9 @@ describe('NFeXmlBuilder', () => {
   it('omite grupos não preenchidos (sem FCP/DIFAL/ST se não há valores)', () => {
     const xml = builder.build(makeDoc());
     expect(xml).not.toContain('<ICMSUFDest>'); // operação SP→RJ B2B contribuinte sem DIFAL no doc
-    expect(xml).not.toContain('<vBCST>'); // sem ST
+    // ST ausente no item: <vICMSST> só existe no grupo ICMS do item. NÃO usar <vBCST>,
+    // que é campo obrigatório (sempre presente, 0.00) dentro de <ICMSTot>.
+    expect(xml).not.toContain('<vICMSST>'); // sem ST no item
   });
 
   it('renderiza PF com tag CPF e PJ com tag CNPJ', () => {

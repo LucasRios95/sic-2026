@@ -24,4 +24,8 @@ export class RoleRepository implements IRoleRepository {
   async findByName(tenantId: string, name: string): Promise<Role | null> {
     return this.repo.findOne({ where: { tenantId, name } });
   }
+
+  async listByTenant(tenantId: string): Promise<Role[]> {
+    return this.repo.find({ where: { tenantId }, order: { name: 'ASC' } });
+  }
 }

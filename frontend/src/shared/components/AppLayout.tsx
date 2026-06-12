@@ -14,6 +14,7 @@ import {
   Plus,
   Settings,
   Shield,
+  UserCog,
   Users,
   X,
 } from 'lucide-react';
@@ -73,6 +74,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Administração',
     items: [
       { to: '/admin/companies', label: 'Empresas', icon: Building2, requiredPermission: 'company.read' },
+      { to: '/admin/users', label: 'Usuários', icon: UserCog, requiredPermission: 'user.read' },
       { to: '/admin/certificates', label: 'Certificados A1', icon: Shield, requiredPermission: 'vault.read' },
       { to: '/admin/configuracoes', label: 'Configurações', icon: Settings, requiredPermission: 'admin.full' },
     ],

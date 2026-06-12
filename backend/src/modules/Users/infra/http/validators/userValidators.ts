@@ -11,3 +11,9 @@ export const createUserSchema = z.object({
     .regex(/[a-z]/, 'Senha deve conter ao menos uma letra minúscula')
     .regex(/\d/, 'Senha deve conter ao menos um número'),
 });
+
+/** Atribuição/revogação de papel ao usuário. companyId ausente = papel global do tenant. */
+export const userRoleSchema = z.object({
+  roleId: z.string().uuid('roleId inválido'),
+  companyId: z.string().uuid('companyId inválido').nullish(),
+});

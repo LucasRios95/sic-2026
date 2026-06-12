@@ -26,6 +26,10 @@ export class UserRepository implements IUserRepository {
     return this.repo.findOne({ where: { email } });
   }
 
+  async listByTenant(tenantId: string): Promise<User[]> {
+    return this.repo.find({ where: { tenantId }, order: { fullName: 'ASC' } });
+  }
+
   async save(user: User): Promise<User> {
     return this.repo.save(user);
   }

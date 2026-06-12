@@ -88,6 +88,9 @@ export const emitirNFeSchema = z.object({
         valorFrete: decimalString.optional(),
         valorSeguro: decimalString.optional(),
         valorOutros: decimalString.optional(),
+        // Override do código de ICMS por item (Simples → CSOSN 3 díg.; Normal → CST 2 díg.).
+        cstIcms: z.string().regex(/^\d{2}$/, 'CST de ICMS tem 2 dígitos').optional(),
+        csosnIcms: z.string().regex(/^\d{3}$/, 'CSOSN tem 3 dígitos').optional(),
       }),
     )
     .min(1),

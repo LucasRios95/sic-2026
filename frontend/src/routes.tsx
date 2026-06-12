@@ -18,6 +18,7 @@ import { InboxRecebidosPage } from '@/pages/InboxRecebidosPage';
 import { InutilizacaoPage } from '@/pages/InutilizacaoPage';
 import { InterstateAliquotsPage } from '@/pages/InterstateAliquotsPage';
 import { LoginPage } from '@/pages/LoginPage';
+import { UsersPage } from '@/pages/UsersPage';
 import { NFeDetailsPage } from '@/pages/NFeDetailsPage';
 import { NFeListPage } from '@/pages/NFeListPage';
 import { NFeNewPage } from '@/pages/NFeNewPage';
@@ -154,6 +155,12 @@ const productsRoute = createRoute({
   component: ProductsPage,
 });
 
+const usersRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/admin/users',
+  component: UsersPage,
+});
+
 const nfeListRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: '/fiscal/nfe',
@@ -203,6 +210,7 @@ const routeTree = rootRoute.addChildren([
     dashboardRoute,
     certificatesRoute,
     companiesRoute,
+    usersRoute,
     customersRoute,
     productsRoute,
     nfeListRoute,

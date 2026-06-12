@@ -2,7 +2,7 @@ import { inject, injectable } from 'tsyringe';
 
 import { AuditService } from '@modules/Auditoria/AuditService';
 import { ICfopRepository } from '@modules/Cfop/repositories/ICfopRepository';
-import { AmbienteSefaz } from '@modules/Companies/infra/typeorm/entities/Company';
+import { AmbienteSefaz, CodigoRegimeTributario } from '@modules/Companies/infra/typeorm/entities/Company';
 import { ICompanyRepository } from '@modules/Companies/repositories/ICompanyRepository';
 import { ICustomerRepository } from '@modules/Customers/repositories/ICustomerRepository';
 import { NotificationService } from '@modules/Notifications/NotificationService';
@@ -29,6 +29,7 @@ import {
 import { NFeDocument, NFeItem as NFeItemDoc } from '../../domain/NFeDocument';
 import { NFeXmlBuilder } from '../../domain/NFeXmlBuilder';
 import { NFe } from '../../infra/typeorm/entities/NFe';
+import { NFeSchemaValidator } from '../../infra/validation/NFeSchemaValidator';
 import { SefazEndpoints } from '../../infra/sefaz/SefazEndpoints';
 import { SefazSoapClient } from '../../infra/sefaz/SefazSoapClient';
 import { NFeSigner } from '../../infra/signing/NFeSigner';
@@ -84,6 +85,9 @@ export class EmitirNFeUseCase {
 
     @inject(NFeSigner)
     private readonly signer: NFeSigner,
+
+    @inject(NFeSchemaValidator)
+    private readonly schemaValidator: NFeSchemaValidator,
 
     @inject(SefazSoapClient)
     private readonly soap: SefazSoapClient,
@@ -216,16 +220,24 @@ export class EmitirNFeUseCase {
 
     // 5) Motor tributário — calcula tributos por item
     const itensCtx = [];
+    // Coleta problemas de configuração tributária dos produtos para avisar de uma vez,
+    // ANTES de assinar/transmitir — evita descobrir um a um via rejeição da SEFAZ.
+    const errosTributacao: string[] = [];
     for (const item of request.itens) {
       const product = await this.productRepository.findById(company.id, item.productId);
       if (!product) throw new NotFoundError(`Produto ${item.productId} não encontrado`);
-      const taxRule = await this.taxRuleRepository.findActiveAt(item.productId, dhEmissao);
-      if (!taxRule) {
+      const taxRuleVigente = await this.taxRuleRepository.findActiveAt(item.productId, dhEmissao);
+      if (!taxRuleVigente) {
         throw new BusinessRuleError(
           `Produto ${product.codigo} sem regra tributária vigente em ${dhEmissao.toISOString()}`,
           'NO_ACTIVE_TAX_RULE',
         );
       }
+      // Override de CST/CSOSN do ICMS informado na nota (faturista ajustou o código fiscal
+      // do item). Aplicado ANTES do motor para que valores e código fiquem coerentes.
+      const taxRule = aplicarOverrideIcms(taxRuleVigente, item, company.crt, product.codigo);
+      // Valida a regra EFETIVA (já com o override) contra os erros de configuração comuns.
+      errosTributacao.push(...validarTributacaoItem(taxRule, company.crt, product.codigo));
       itensCtx.push({
         itemId: `item-${item.numeroItem}`,
         productId: product.id,
@@ -243,6 +255,10 @@ export class EmitirNFeUseCase {
         // Mantém referência para a persistência depois.
         __sourceItem: { ...item, product, taxRule },
       });
+    }
+
+    if (errosTributacao.length > 0) {
+      throw new BusinessRuleError(errosTributacao.join(' · '), 'INVALID_PRODUCT_TAX_CONFIG');
     }
 
     const contexto: ContextoCalculo = {
@@ -633,6 +649,32 @@ export class EmitirNFeUseCase {
     const cert = await this.certAccessor.retrieve(persisted.companyId, request.certificateVaultRef!);
     const signedXml = this.signer.sign(xmlUnsigned, cert.content, cert.password, `NFe${chaveAcesso}`);
 
+    // Validação XSD local do XML JÁ ASSINADO (o nfe_v4.00.xsd exige a <Signature>, então
+    // só o assinado valida por completo — é também exatamente o que a SEFAZ valida no lote).
+    // Em 'block', schema inválido vira rejeição LOCAL sem ir à SEFAZ: o slot de numeração
+    // segue reutilizável (REJECTED) e o x_motivo traz o elemento/linha exatos, em vez do
+    // cStat 225 genérico. 'warn' apenas loga; 'off' não valida.
+    const schemaErrors = this.schemaValidator.validate(signedXml);
+    if (schemaErrors.length > 0) {
+      const resumo = this.schemaValidator.formatErrors(schemaErrors);
+      if (this.schemaValidator.mode === 'block') {
+        logger.warn(
+          { nfeId: persisted.id, chaveAcesso, schemaErrors },
+          'NF-e reprovada na validação XSD local — não transmitida',
+        );
+        return this.nfeRepository.update(persisted.id, {
+          status: DocumentStatus.REJECTED,
+          cStat: '225',
+          xMotivo: `Validação XSD local: ${resumo}`.slice(0, 300),
+          xmlAssinado: signedXml,
+        });
+      }
+      logger.warn(
+        { nfeId: persisted.id, chaveAcesso, schemaErrors },
+        'NF-e com erros de validação XSD (modo warn) — transmitindo mesmo assim',
+      );
+    }
+
     // Envelope nfeAutorizacao4: precisa do <enviNFe> wrapping a <NFe> assinada.
     const enviNFe = [
       '<enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">',
@@ -888,6 +930,14 @@ export interface EmitirNFeItemInput {
   valorFrete?: string;
   valorSeguro?: string;
   valorOutros?: string;
+  /**
+   * Override do código de ICMS deste item, ajustado pelo faturista na nota. Conforme o
+   * regime da empresa emitente: `csosnIcms` para Simples Nacional (CRT 1/2/4), `cstIcms`
+   * para Regime Normal (CRT 3). Quando informado, substitui o valor da regra do produto e
+   * o motor recalcula os valores (ver `aplicarOverrideIcms`). Omitido = usa a regra.
+   */
+  cstIcms?: string;
+  csosnIcms?: string;
 }
 
 export interface EmitirNFePagamentoInput {
@@ -1000,6 +1050,134 @@ function extractProtocolo(responseXml: string): string | null {
  * Quando o CFOP recebido não é digitável (formato inválido), devolve como está e a
  * validação posterior (`validarCfops`) rejeita com mensagem clara.
  */
+/**
+ * Aplica o override de CST/CSOSN do ICMS informado item a item na nota, sobre a regra
+ * tributária vigente do produto. Regras:
+ *  - Validação por regime: empresa do Simples (CRT 1/2/4) usa CSOSN; Regime Normal (CRT 3)
+ *    usa CST. Informar o código do regime errado é rejeitado com mensagem clara.
+ *  - Coerência de valores: códigos "sem ICMS próprio" (CSOSN 102/103/300/400/500 e CST
+ *    40/41/50/60) zeram a alíquota, então o motor não gera vICMS e o XML sai só com
+ *    orig+CST/CSOSN. Os demais mantêm a alíquota da regra (geram vICMS / crédito).
+ *
+ * Observação: a apuração de ICMS próprio em operação INTERESTADUAL usa a tabela de
+ * alíquotas, não a `aliqIcms` da regra — zerar a alíquota só suprime o ICMS no caminho
+ * intraestadual (cenário típico de Simples/varejo). Interestadual fica como evolução.
+ *
+ * Retorna a própria regra (sem clonar) quando o item não traz override.
+ */
+export function aplicarOverrideIcms<
+  T extends { cstIcms?: string | null; csosnIcms?: string | null; aliqIcms?: string | null },
+>(
+  rule: T,
+  item: Pick<EmitirNFeItemInput, 'cstIcms' | 'csosnIcms'>,
+  crt: CodigoRegimeTributario,
+  codigoProduto: string,
+): T {
+  const cst = item.cstIcms?.trim();
+  const csosn = item.csosnIcms?.trim();
+  if (!cst && !csosn) return rule;
+
+  const simples = crt !== CodigoRegimeTributario.REGIME_NORMAL;
+  if (simples && cst && !csosn) {
+    throw new BusinessRuleError(
+      `Item ${codigoProduto}: empresa do Simples Nacional usa CSOSN, não CST de ICMS.`,
+      'ICMS_CODE_REGIME_MISMATCH',
+    );
+  }
+  if (!simples && csosn && !cst) {
+    throw new BusinessRuleError(
+      `Item ${codigoProduto}: empresa do Regime Normal usa CST de ICMS, não CSOSN.`,
+      'ICMS_CODE_REGIME_MISMATCH',
+    );
+  }
+
+  const codigo = (simples ? csosn : cst)!;
+  const semIcmsProprio = simples
+    ? ['102', '103', '300', '400', '500'].includes(codigo)
+    : ['40', '41', '50', '60'].includes(codigo);
+
+  return {
+    ...rule,
+    cstIcms: simples ? null : codigo,
+    csosnIcms: simples ? codigo : null,
+    aliqIcms: semIcmsProprio ? null : rule.aliqIcms,
+  };
+}
+
+/**
+ * Placeholders de cClassTrib que não existem na tabela oficial — entraram por seed/import
+ * incompleto. Causam cStat 1023 ("Classificação Tributária do IBS/CBS inexistente").
+ */
+const CCLASSTRIB_PLACEHOLDERS = new Set(['000000', '100000', '999999']);
+
+/**
+ * Valida a configuração tributária EFETIVA do item (já com o override aplicado) contra os
+ * erros recorrentes que só apareceriam como rejeição da SEFAZ. Retorna a lista de problemas
+ * (vazia = ok). Pega:
+ *  - Código de ICMS incoerente com o regime (Simples sem CSOSN / Normal sem CST).
+ *  - cClassTrib do IBS/CBS ausente, fora do formato 6 dígitos, ou placeholder inválido.
+ *  - PIS/COFINS sem CST no Regime Normal (evita emitir tributo zerado por engano — no
+ *    Simples o builder usa CST 49 zerado, então não exigimos).
+ *
+ * NÃO valida o cClassTrib contra a tabela oficial completa (não embarcada) — só formato e
+ * placeholders conhecidos. A SEFAZ continua sendo a autoridade final sobre o código.
+ */
+export function validarTributacaoItem(
+  rule: {
+    cstIcms?: string | null;
+    csosnIcms?: string | null;
+    cstIbsCbs?: string | null;
+    cClassTrib?: string | null;
+    cstPis?: string | null;
+    cstCofins?: string | null;
+  },
+  crt: CodigoRegimeTributario,
+  codigoProduto: string,
+): string[] {
+  const erros: string[] = [];
+  const simples = crt !== CodigoRegimeTributario.REGIME_NORMAL;
+
+  if (simples && !rule.csosnIcms) {
+    erros.push(
+      `Produto ${codigoProduto}: empresa do Simples Nacional exige CSOSN no ICMS ` +
+        `(encontrado CST "${rule.cstIcms ?? '—'}"). Ajuste a tributação do produto ou ` +
+        'informe o CSOSN na nota.',
+    );
+  }
+  if (!simples && !rule.cstIcms) {
+    erros.push(
+      `Produto ${codigoProduto}: empresa do Regime Normal exige CST de ICMS ` +
+        `(encontrado CSOSN "${rule.csosnIcms ?? '—'}").`,
+    );
+  }
+
+  if (rule.cstIbsCbs) {
+    const cc = rule.cClassTrib?.trim();
+    if (!cc || !/^\d{6}$/.test(cc)) {
+      erros.push(
+        `Produto ${codigoProduto}: cClassTrib do IBS/CBS ausente ou inválido ("${cc ?? '—'}"). ` +
+          'Deve ter 6 dígitos da tabela oficial (ex.: 000001 para tributação integral).',
+      );
+    } else if (CCLASSTRIB_PLACEHOLDERS.has(cc)) {
+      erros.push(
+        `Produto ${codigoProduto}: cClassTrib "${cc}" não existe na tabela oficial (placeholder). ` +
+          'Use o código correto (ex.: 000001 para CST 000 — tributação integral).',
+      );
+    }
+  }
+
+  if (!simples) {
+    if (!rule.cstPis) {
+      erros.push(`Produto ${codigoProduto}: sem CST de PIS (Regime Normal) — configure a tributação.`);
+    }
+    if (!rule.cstCofins) {
+      erros.push(`Produto ${codigoProduto}: sem CST de COFINS (Regime Normal) — configure a tributação.`);
+    }
+  }
+
+  return erros;
+}
+
 function ajustarCfopOperacao(
   cfop: string,
   operacaoInterestadual: boolean,
