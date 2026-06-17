@@ -130,11 +130,11 @@ export function NFeDetailsPage(): React.ReactElement {
   );
 
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="p-6 lg:p-8 space-y-6 max-w-5xl mx-auto">
       <header className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight">
+            <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">
               NF-e nº {String(nfe.numero).padStart(9, '0')} · Série {nfe.serie}
             </h1>
             <Badge className={STATUS_STYLES[nfe.status]}>{STATUS_LABEL[nfe.status]}</Badge>

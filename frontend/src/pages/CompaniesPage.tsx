@@ -1,33 +1,14 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, Loader2, Pencil, Plus, Search } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from '@tanstack/react-router';
+import { Building2, Pencil, Plus, Search } from 'lucide-react';
 import { useState } from 'react';
-import { toast } from 'sonner';
 
-import {
-  createCompany,
-  listCompanies,
-  updateCompany,
-  type Company,
-} from '@/features/companies/companies-api';
-import {
-  COMPANY_FORM_INITIAL,
-  CompanyForm,
-  companyFormToPayload,
-  companyToFormState,
-  type CompanyFormState,
-} from '@/features/companies/CompanyForm';
-import { ApiError } from '@/lib/api';
+import { listCompanies, type Company } from '@/features/companies/companies-api';
 import { Button } from '@/shared/components/ui/Button';
 import { Card } from '@/shared/components/ui/Card';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/shared/components/ui/Dialog';
 import { Input } from '@/shared/components/ui/Input';
+import { PageContainer } from '@/shared/components/PageContainer';
+import { PageHeader } from '@/shared/components/PageHeader';
 
 const CRT_LABEL: Record<string, string> = {
   SIMPLES_NACIONAL: 'Simples Nacional',
@@ -37,78 +18,19 @@ const CRT_LABEL: Record<string, string> = {
 };
 
 export function CompaniesPage(): React.ReactElement {
-  const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
-  const [createOpen, setCreateOpen] = useState(false);
-  const [form, setForm] = useState<CompanyFormState>(COMPANY_FORM_INITIAL);
-
-  // Edicao: o id != null indica modo edit, e o form e hidratado pelo registro escolhido.
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<CompanyFormState>(COMPANY_FORM_INITIAL);
 
   const { data: companies = [], isLoading } = useQuery({
     queryKey: ['companies'],
     queryFn: listCompanies,
   });
 
-  const { mutate: criar, isPending: criando } = useMutation({
-    mutationFn: createCompany,
-    onSuccess: (created) => {
-      void queryClient.invalidateQueries({ queryKey: ['companies'] });
-      toast.success(`Empresa "${created.razaoSocial}" cadastrada!`);
-      setForm(COMPANY_FORM_INITIAL);
-      setCreateOpen(false);
-    },
-    onError: (err) => {
-      const msg = err instanceof ApiError ? err.message : 'Erro ao cadastrar empresa.';
-      toast.error(msg);
-    },
-  });
-
-  const { mutate: salvarEdicao, isPending: salvandoEdicao } = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: ReturnType<typeof companyFormToPayload> }) => {
-      // No update, CNPJ nao vai (campo identitario imutavel no backend).
-      const { cnpj: _cnpj, ...rest } = payload;
-      void _cnpj;
-      return updateCompany(id, rest);
-    },
-    onSuccess: (updated) => {
-      void queryClient.invalidateQueries({ queryKey: ['companies'] });
-      toast.success(`"${updated.razaoSocial}" atualizada!`);
-      setEditingId(null);
-    },
-    onError: (err) => {
-      const msg = err instanceof ApiError ? err.message : 'Erro ao atualizar empresa.';
-      toast.error(msg);
-    },
-  });
-
-  function openEdit(c: Company): void {
-    setEditingId(c.id);
-    setEditForm(companyToFormState(c));
+  function goNew(): void {
+    void navigate({ to: '/admin/companies/new' });
   }
-
-  function setField<K extends keyof CompanyFormState>(key: K, value: CompanyFormState[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  }
-
-  function setEditField<K extends keyof CompanyFormState>(key: K, value: CompanyFormState[K]) {
-    setEditForm((prev) => ({ ...prev, [key]: value }));
-  }
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!form.cnpj || !form.razaoSocial || !form.uf || !form.municipio) {
-      toast.error('CNPJ, Razão Social, UF e Município são obrigatórios.');
-      return;
-    }
-    criar(companyFormToPayload(form));
-  }
-
-  function handleSubmitEdit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!editingId) return;
-    salvarEdicao({ id: editingId, payload: companyFormToPayload(editForm) });
+  function goEdit(id: string): void {
+    void navigate({ to: '/admin/companies/$id/edit', params: { id } });
   }
 
   const filtered = companies.filter((c) => {
@@ -122,56 +44,23 @@ export function CompaniesPage(): React.ReactElement {
   });
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fade-in">
-        <div>
-          <h1 className="font-display text-2xl font-bold text-foreground">Empresas</h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            {isLoading
-              ? 'Carregando…'
-              : `${companies.length} empresa${companies.length !== 1 ? 's' : ''} cadastrada${companies.length !== 1 ? 's' : ''}`}
-          </p>
-        </div>
+    <PageContainer maxWidth="wide">
+      <PageHeader
+        title="Empresas"
+        description={
+          isLoading
+            ? 'Carregando…'
+            : `${companies.length} empresa${companies.length !== 1 ? 's' : ''} cadastrada${companies.length !== 1 ? 's' : ''}`
+        }
+        actions={
+          <Button variant="primary" className="gap-2" onClick={goNew}>
+            <Plus className="h-4 w-4" />
+            Nova empresa
+          </Button>
+        }
+      />
 
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogTrigger asChild>
-            <Button variant="primary" className="gap-2">
-              <Plus className="h-4 w-4" />
-              Nova empresa
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Cadastrar empresa</DialogTitle>
-              <DialogDescription>
-                Informe os dados fiscais da empresa emissora. Campos com * são obrigatórios.
-              </DialogDescription>
-            </DialogHeader>
-            <form onSubmit={handleSubmit}>
-              <CompanyForm form={form} setField={setField} disabled={criando} />
-              <Button
-                type="submit"
-                variant="primary"
-                className="w-full mt-6"
-                disabled={criando}
-              >
-                {criando ? (
-                  <>
-                    <Loader2 className="animate-spin" />
-                    Salvando…
-                  </>
-                ) : (
-                  'Salvar empresa'
-                )}
-              </Button>
-            </form>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      {/* Search */}
-      <div className="relative max-w-sm animate-fade-in" style={{ animationDelay: '100ms' }}>
+      <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           placeholder="Buscar por nome ou CNPJ..."
@@ -181,11 +70,10 @@ export function CompaniesPage(): React.ReactElement {
         />
       </div>
 
-      {/* Grid */}
       {isLoading ? (
         <SkeletonGrid />
       ) : filtered.length === 0 ? (
-        <EmptyState search={search} onCreate={() => setCreateOpen(true)} />
+        <EmptyState search={search} onCreate={goNew} />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((company, i) => (
@@ -193,51 +81,12 @@ export function CompaniesPage(): React.ReactElement {
               key={company.id}
               company={company}
               delay={i * 60}
-              onEdit={() => openEdit(company)}
+              onEdit={() => goEdit(company.id)}
             />
           ))}
         </div>
       )}
-
-      {/* Dialog de edição */}
-      <Dialog
-        open={editingId !== null}
-        onOpenChange={(o) => !o && setEditingId(null)}
-      >
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Editar empresa</DialogTitle>
-            <DialogDescription>
-              CNPJ é imutável (afeta chave de acesso da NF-e). Para mudar de homologação
-              para produção, ajuste o campo <strong>Ambiente SEFAZ</strong> abaixo.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleSubmitEdit}>
-            <CompanyForm
-              form={editForm}
-              setField={setEditField}
-              disabled={salvandoEdicao}
-              cnpjDisabled
-            />
-            <Button
-              type="submit"
-              variant="primary"
-              className="w-full mt-6"
-              disabled={salvandoEdicao}
-            >
-              {salvandoEdicao ? (
-                <>
-                  <Loader2 className="animate-spin" />
-                  Salvando…
-                </>
-              ) : (
-                'Salvar alterações'
-              )}
-            </Button>
-          </form>
-        </DialogContent>
-      </Dialog>
-    </div>
+    </PageContainer>
   );
 }
 

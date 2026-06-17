@@ -66,9 +66,9 @@ export function CertificatesPage(): React.ReactElement {
   });
 
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="p-6 lg:p-8 space-y-6 max-w-5xl mx-auto">
       <header>
-        <h1 className="text-2xl font-bold tracking-tight">Certificados Digitais</h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Certificados Digitais</h1>
         <p className="text-muted-foreground">
           Custódia de e-CNPJ A1 da empresa. Conteúdo do PFX nunca é mostrado — só metadados.
         </p>

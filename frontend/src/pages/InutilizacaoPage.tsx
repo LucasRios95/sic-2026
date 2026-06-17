@@ -82,7 +82,7 @@ export function InutilizacaoPage(): React.ReactElement {
     certificatesQuery.data?.filter((c) => c.active && new Date(c.validTo) > new Date()) ?? [];
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="p-6 lg:p-8 space-y-6 max-w-3xl mx-auto">
       <header>
         <Link
           to="/fiscal/nfe"
@@ -90,7 +90,7 @@ export function InutilizacaoPage(): React.ReactElement {
         >
           <ArrowLeft className="h-3.5 w-3.5" /> Voltar para NF-e
         </Link>
-        <h1 className="text-2xl font-bold tracking-tight mt-2">Inutilizar faixa de NF-e</h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-foreground mt-2">Inutilizar faixa de NF-e</h1>
         <p className="text-muted-foreground">
           Envia evento à SEFAZ inutilizando uma faixa de números não usados. Definitivo —
           a faixa não pode ser reusada depois.

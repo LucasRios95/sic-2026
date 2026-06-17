@@ -33,3 +33,12 @@ export async function logout(refreshToken: string): Promise<void> {
     skipAuth: true,
   });
 }
+
+export interface ChangePasswordPayload {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export async function changePassword(payload: ChangePasswordPayload): Promise<void> {
+  await api<void>('/auth/change-password', { method: 'POST', body: payload });
+}

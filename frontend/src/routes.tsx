@@ -8,9 +8,12 @@ import {
 
 import { useAuthStore } from '@/features/auth/auth-store';
 import { CertificatesPage } from '@/pages/CertificatesPage';
+import { CfopFormPage } from '@/pages/CfopFormPage';
 import { CfopsPage } from '@/pages/CfopsPage';
 import { NcmsPage } from '@/pages/NcmsPage';
 import { CompaniesPage } from '@/pages/CompaniesPage';
+import { CompanyFormPage } from '@/pages/CompanyFormPage';
+import { CustomerFormPage } from '@/pages/CustomerFormPage';
 import { CustomersPage } from '@/pages/CustomersPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { IcmsStMvaPage } from '@/pages/IcmsStMvaPage';
@@ -18,14 +21,18 @@ import { InboxRecebidosPage } from '@/pages/InboxRecebidosPage';
 import { InutilizacaoPage } from '@/pages/InutilizacaoPage';
 import { InterstateAliquotsPage } from '@/pages/InterstateAliquotsPage';
 import { LoginPage } from '@/pages/LoginPage';
+import { UserFormPage } from '@/pages/UserFormPage';
 import { UsersPage } from '@/pages/UsersPage';
 import { NFeDetailsPage } from '@/pages/NFeDetailsPage';
 import { NFeListPage } from '@/pages/NFeListPage';
 import { NFeNewPage } from '@/pages/NFeNewPage';
+import { ProductFormPage } from '@/pages/ProductFormPage';
 import { ProductsPage } from '@/pages/ProductsPage';
 import { ReceivedDocumentDetailsPage } from '@/pages/ReceivedDocumentDetailsPage';
 import { SelectCompanyPage } from '@/pages/SelectCompanyPage';
+import { SettingsPage } from '@/pages/SettingsPage';
 import { TaxBenefitsPage } from '@/pages/TaxBenefitsPage';
+import { TaxParameterFormPage } from '@/pages/TaxParameterFormPage';
 import { TaxParametersPage } from '@/pages/TaxParametersPage';
 import { AppLayout } from '@/shared/components/AppLayout';
 
@@ -107,10 +114,34 @@ const companiesRoute = createRoute({
   component: CompaniesPage,
 });
 
+const companyNewRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/admin/companies/new',
+  component: CompanyFormPage,
+});
+
+const companyEditRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/admin/companies/$id/edit',
+  component: CompanyFormPage,
+});
+
 const taxParamsRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: '/admin/tax-params',
   component: TaxParametersPage,
+});
+
+const taxParamNewRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/admin/tax-params/new',
+  component: TaxParameterFormPage,
+});
+
+const taxParamEditRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/admin/tax-params/$id/edit',
+  component: TaxParameterFormPage,
 });
 
 const taxInterstateRoute = createRoute({
@@ -137,6 +168,18 @@ const cfopsRoute = createRoute({
   component: CfopsPage,
 });
 
+const cfopNewRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/admin/cfops/new',
+  component: CfopFormPage,
+});
+
+const cfopEditRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/admin/cfops/$id/edit',
+  component: CfopFormPage,
+});
+
 const ncmsRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: '/admin/ncms',
@@ -149,16 +192,58 @@ const customersRoute = createRoute({
   component: CustomersPage,
 });
 
+const customerNewRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/cadastros/customers/new',
+  component: CustomerFormPage,
+});
+
+const customerEditRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/cadastros/customers/$id/edit',
+  component: CustomerFormPage,
+});
+
 const productsRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: '/cadastros/products',
   component: ProductsPage,
 });
 
+const productNewRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/cadastros/products/new',
+  component: ProductFormPage,
+});
+
+const productEditRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/cadastros/products/$id/edit',
+  component: ProductFormPage,
+});
+
 const usersRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: '/admin/users',
   component: UsersPage,
+});
+
+const userNewRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/admin/users/new',
+  component: UserFormPage,
+});
+
+const userEditRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/admin/users/$id/edit',
+  component: UserFormPage,
+});
+
+const settingsRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/admin/configuracoes',
+  component: SettingsPage,
 });
 
 const nfeListRoute = createRoute({
@@ -210,9 +295,18 @@ const routeTree = rootRoute.addChildren([
     dashboardRoute,
     certificatesRoute,
     companiesRoute,
+    companyNewRoute,
+    companyEditRoute,
     usersRoute,
+    userNewRoute,
+    userEditRoute,
+    settingsRoute,
     customersRoute,
+    customerNewRoute,
+    customerEditRoute,
     productsRoute,
+    productNewRoute,
+    productEditRoute,
     nfeListRoute,
     nfeNewRoute,
     nfeInutilizarRoute,
@@ -220,10 +314,14 @@ const routeTree = rootRoute.addChildren([
     inboxRecebidosRoute,
     receivedDocumentDetailsRoute,
     taxParamsRoute,
+    taxParamNewRoute,
+    taxParamEditRoute,
     taxInterstateRoute,
     taxIcmsStRoute,
     taxBenefitsRoute,
     cfopsRoute,
+    cfopNewRoute,
+    cfopEditRoute,
     ncmsRoute,
   ]),
 ]);
