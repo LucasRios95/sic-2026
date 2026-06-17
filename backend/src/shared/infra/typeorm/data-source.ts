@@ -19,11 +19,16 @@ const rootDir = path.resolve(__dirname, '..', '..', '..');
 
 export const dataSourceOptions: DataSourceOptions = {
   type: 'postgres',
-  host: env.DB_HOST,
-  port: env.DB_PORT,
-  username: env.DB_USER,
-  password: env.DB_PASS,
-  database: env.DB_NAME,
+  // DATABASE_URL (ex.: Railway) tem precedência; senão usa as variáveis discretas DB_*.
+  ...(env.DATABASE_URL
+    ? { url: env.DATABASE_URL }
+    : {
+        host: env.DB_HOST,
+        port: env.DB_PORT,
+        username: env.DB_USER,
+        password: env.DB_PASS,
+        database: env.DB_NAME,
+      }),
   schema: env.DB_SCHEMA,
   synchronize: env.DB_SYNCHRONIZE,
   logging: env.DB_LOGGING,

@@ -1,7 +1,8 @@
 import { Queue } from 'bullmq';
-import Redis, { Redis as RedisClient } from 'ioredis';
+import { Redis as RedisClient } from 'ioredis';
 
 import { env } from '@config/env';
+import { createRedisConnection } from '@shared/infra/queues/createRedisConnection';
 import { logger } from '@shared/logger';
 
 import { IQueueProvider, JobOptions, QueueName } from '../IQueueProvider';
@@ -29,15 +30,9 @@ export class BullMqQueueProvider implements IQueueProvider {
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
-    this.connection = new Redis({
-      host: env.REDIS_HOST,
-      port: env.REDIS_PORT,
-      password: env.REDIS_PASSWORD || undefined,
-      db: env.REDIS_DB,
-      // BullMQ exige `maxRetriesPerRequest: null` em conexões compartilhadas com workers.
-      maxRetriesPerRequest: null,
-      lazyConnect: true,
-    });
+    // lazyConnect: a app sobe mesmo sem Redis; conecta na 1ª chamada .add().
+    // maxRetriesPerRequest:null é setado dentro do helper (exigência do BullMQ).
+    this.connection = createRedisConnection({ lazyConnect: true });
 
     this.connection.on('error', (err) => {
       logger.warn({ err }, 'Redis connection error — filas em modo degradado');

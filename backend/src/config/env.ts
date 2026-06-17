@@ -6,11 +6,15 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3333),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
 
+  // URL única de conexão (ex.: Railway: DATABASE_URL=${{Postgres.DATABASE_PRIVATE_URL}}).
+  // Quando definida, tem precedência sobre as variáveis discretas DB_* abaixo.
+  DATABASE_URL: z.string().optional().default(''),
   DB_HOST: z.string().min(1).default('localhost'),
   DB_PORT: z.coerce.number().int().positive().default(5432),
-  DB_USER: z.string().min(1),
-  DB_PASS: z.string().min(1),
-  DB_NAME: z.string().min(1),
+  // Opcionais porque DATABASE_URL pode supri-las; um refine garante "URL OU trio discreto".
+  DB_USER: z.string().optional().default(''),
+  DB_PASS: z.string().optional().default(''),
+  DB_NAME: z.string().optional().default(''),
   DB_SCHEMA: z.string().default('public'),
   DB_POOL_MIN: z.coerce.number().int().nonnegative().default(2),
   DB_POOL_MAX: z.coerce.number().int().positive().default(10),
@@ -33,6 +37,8 @@ const envSchema = z.object({
   CORS_ALLOWED_ORIGINS: z.string().default(''),
 
   // --- Redis / BullMQ ---
+  // URL única do Redis (ex.: Railway: REDIS_URL=${{Redis.REDIS_PRIVATE_URL}}). Precede REDIS_*.
+  REDIS_URL: z.string().optional().default(''),
   REDIS_HOST: z.string().min(1).default('localhost'),
   REDIS_PORT: z.coerce.number().int().positive().default(6379),
   REDIS_PASSWORD: z.string().optional().default(''),
@@ -78,6 +84,15 @@ const envSchema = z.object({
   MAIL_PASS: z.string().optional().default(''),
   MAIL_FROM_NAME: z.string().default('Sistema Fiscal SIC 2026'),
   MAIL_FROM_ADDRESS: z.string().email().default('no-reply@example.com'),
+}).superRefine((cfg, ctx) => {
+  // Banco: aceita DATABASE_URL única OU o trio discreto DB_USER/DB_PASS/DB_NAME.
+  if (!cfg.DATABASE_URL && !(cfg.DB_USER && cfg.DB_PASS && cfg.DB_NAME)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['DATABASE_URL'],
+      message: 'Defina DATABASE_URL OU as três variáveis DB_USER, DB_PASS e DB_NAME.',
+    });
+  }
 });
 
 const parsed = envSchema.safeParse(process.env);

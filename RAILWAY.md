@@ -106,15 +106,22 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"   # 
 
 ### Backend **e** Worker (as MESMAS variáveis nos dois serviços)
 ```
-# Conexão — referências aos plugins (ajuste os nomes Postgres/Redis se renomeou)
-DB_HOST=${{Postgres.PGHOST}}
-DB_PORT=${{Postgres.PGPORT}}
-DB_USER=${{Postgres.PGUSER}}
-DB_PASS=${{Postgres.PGPASSWORD}}
-DB_NAME=${{Postgres.PGDATABASE}}
-REDIS_HOST=${{Redis.REDISHOST}}
-REDIS_PORT=${{Redis.REDISPORT}}
-REDIS_PASSWORD=${{Redis.REDISPASSWORD}}
+# Conexão — UMA referência por plugin (recomendado: simples e à prova de erro de digitação)
+# Use a *private URL* (rede interna do Railway, sem custo de egress e mais rápida).
+# Se o plugin não expuser a *_PRIVATE_URL, troque por ${{Postgres.DATABASE_URL}} / ${{Redis.REDIS_URL}}.
+DATABASE_URL=${{Postgres.DATABASE_PRIVATE_URL}}
+REDIS_URL=${{Redis.REDIS_PRIVATE_URL}}
+
+# ── Alternativa (variáveis discretas) ──────────────────────────────────────────
+# Se preferir, NÃO defina DATABASE_URL/REDIS_URL e use as 8 abaixo no lugar:
+# DB_HOST=${{Postgres.PGHOST}}
+# DB_PORT=${{Postgres.PGPORT}}
+# DB_USER=${{Postgres.PGUSER}}
+# DB_PASS=${{Postgres.PGPASSWORD}}
+# DB_NAME=${{Postgres.PGDATABASE}}
+# REDIS_HOST=${{Redis.REDISHOST}}
+# REDIS_PORT=${{Redis.REDISPORT}}
+# REDIS_PASSWORD=${{Redis.REDISPASSWORD}}
 
 # Segredos (você gera)
 JWT_SECRET=<cole o aleatório gerado>

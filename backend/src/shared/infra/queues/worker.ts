@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 
 import { Queue } from 'bullmq';
-import { Redis } from 'ioredis';
+import { createRedisConnection } from '@shared/infra/queues/createRedisConnection';
 import { container } from 'tsyringe';
 
 import { env } from '@config/env';
@@ -47,13 +47,7 @@ async function bootstrap(): Promise<void> {
   await appDataSource.initialize();
   logger.info({ database: env.DB_NAME }, 'Conexão com o banco estabelecida');
 
-  const workerConnection = new Redis({
-    host: env.REDIS_HOST,
-    port: env.REDIS_PORT,
-    password: env.REDIS_PASSWORD || undefined,
-    db: env.REDIS_DB,
-    maxRetriesPerRequest: null,
-  });
+  const workerConnection = createRedisConnection();
 
   const reconciliationWorker = new NFeReconciliationWorker();
   reconciliationWorker.start(workerConnection);
