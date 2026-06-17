@@ -23,8 +23,10 @@ Migrations + seed rodam como **Pre-Deploy Command** do backend (não há serviç
 
 Já aplicadas:
 - `frontend/nginx.conf` virou **template** (`${BACKEND_UPSTREAM}`, `${NGINX_RESOLVER}`, `${NGINX_RESOLVER_OPTS}`) — o `Dockerfile.prod` do frontend copia para `/etc/nginx/templates/` e o envsubst do nginx renderiza no boot. Defaults reproduzem o comportamento local; no Railway sobrescrevemos por env.
+- `backend/railway.json` e `frontend/railway.json` já apontam o builder para `Dockerfile.prod` — o Railway seleciona automaticamente (não precisa setar "Dockerfile Path" no painel).
+- **Bundle ICP-Brasil embarcado** em `backend/certs/icp-brasil.pem` (vai na imagem via `COPY . .`) → `NFE_TLS_CA_BUNDLE=/app/certs/icp-brasil.pem` funciona para mTLS de produção. Para atualizar quando as ACs rotacionarem: `scripts/download-icp-brasil.ps1` + commit + redeploy.
 
-Nada mais de código é obrigatório — os `Dockerfile.prod` de backend e frontend já servem para o Railway buildar.
+Nada mais de código é obrigatório.
 
 ## Passo a passo
 
@@ -115,6 +117,9 @@ STORAGE_DRIVER=filesystem
 STORAGE_PATH=/app/tmp/docs
 CORS_ALLOWED_ORIGINS=https://<seu-frontend>.up.railway.app
 
+# mTLS SEFAZ — bundle ICP-Brasil JÁ embarcado na imagem (backend/certs/icp-brasil.pem)
+NFE_TLS_CA_BUNDLE=/app/certs/icp-brasil.pem
+
 # Opcionais
 LOG_LEVEL=info
 JWT_ACCESS_TOKEN_EXPIRES_IN=15m
@@ -122,7 +127,6 @@ JWT_REFRESH_TOKEN_EXPIRES_IN=7d
 BCRYPT_COST=12
 LOGIN_MAX_ATTEMPTS=5
 LOGIN_LOCK_DURATION_MINUTES=15
-NFE_TLS_CA_BUNDLE=
 MAIL_HOST=
 ```
 
@@ -152,7 +156,7 @@ NGINX_RESOLVER_OPTS=
 ## Pontos a confirmar no 1º deploy
 - **Resolver do nginx no Railway** (`NGINX_RESOLVER`): a rede privada é IPv6; ajuste o endereço do resolver conforme a doc atual do Railway. Se o front der 502 em `/api`, é quase sempre isso.
 - **Porta do backend na rede privada**: o frontend aponta para `backend.railway.internal:3333`; garanta que o backend escuta em `3333` (`PORT=3333`).
-- **ICP-Brasil bundle**: para SEFAZ produção, embarque o bundle na imagem ou baixe no boot (`scripts/download-icp-brasil.ps1` é o equivalente local).
+- **ICP-Brasil bundle**: já embarcado em `backend/certs/icp-brasil.pem` (na imagem). Só confirme que `NFE_TLS_CA_BUNDLE=/app/certs/icp-brasil.pem` está setado no backend/worker. Atualizar quando as ACs rotacionarem: `scripts/download-icp-brasil.ps1` + commit + redeploy.
 
 ## Evolução
 - ✅ **Vault no banco** (`VAULT_DRIVER=db`) — **implementado**: `PostgresCertificateVault` + migration `certificate_vault_entries`. Elimina a dependência de volume e dá ao worker acesso ao certificado.
