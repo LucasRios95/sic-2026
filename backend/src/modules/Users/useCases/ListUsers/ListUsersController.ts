@@ -7,8 +7,15 @@ export class ListUsersController {
   async handle(request: Request, response: Response): Promise<Response> {
     const useCase = container.resolve(ListUsersUseCase);
     const users = await useCase.execute(request.user!.tenantId);
-    // Nunca expõe hash de senha nem segredo MFA.
-    const data = users.map(({ passwordHash: _ph, mfaSecret: _ms, ...safe }) => safe);
+    // DTO explícito: só o que a UI precisa. Nunca expõe hash de senha, segredo MFA
+    // nem campos internos (tenantId, failedLogins, lockedUntil…). `isActive` é o
+    // contrato com o front (entidade usa `active`).
+    const data = users.map((u) => ({
+      id: u.id,
+      email: u.email,
+      fullName: u.fullName,
+      isActive: u.active,
+    }));
     return response.json({ data });
   }
 }

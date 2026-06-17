@@ -9,7 +9,14 @@ export class CreateUserController {
     const tenantId = request.user!.tenantId;
 
     const user = await useCase.execute({ ...request.body, tenantId });
-    const { passwordHash: _ph, mfaSecret: _ms, ...safe } = user;
-    return response.status(201).json({ data: safe });
+    // Mesmo DTO do ListUsers — `isActive` é o contrato com o front (entidade usa `active`).
+    return response.status(201).json({
+      data: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        isActive: user.active,
+      },
+    });
   }
 }

@@ -6,15 +6,17 @@ import { ListUserRolesController } from '@modules/AccessControl/useCases/ListUse
 import { RevokeUserRoleController } from '@modules/AccessControl/useCases/RevokeUserRole/RevokeUserRoleController';
 import { CreateUserController } from '@modules/Users/useCases/CreateUser/CreateUserController';
 import { ListUsersController } from '@modules/Users/useCases/ListUsers/ListUsersController';
+import { UpdateUserController } from '@modules/Users/useCases/UpdateUser/UpdateUserController';
 import { requireAuth } from '@shared/infra/http/middlewares/requireAuth';
 import { requirePermission } from '@shared/infra/http/middlewares/requirePermission';
 import { validate } from '@shared/infra/http/middlewares/validate';
 
-import { createUserSchema, userRoleSchema } from '../validators/userValidators';
+import { createUserSchema, updateUserSchema, userRoleSchema } from '../validators/userValidators';
 
 export const usersRoutes = Router();
 
 const create = new CreateUserController();
+const update = new UpdateUserController();
 const list = new ListUsersController();
 const listRoles = new ListRolesController();
 const listUserRoles = new ListUserRolesController();
@@ -40,6 +42,14 @@ usersRoutes.post(
   requirePermission('user.create', 'admin.full'),
   validate({ body: createUserSchema }),
   (req, res) => create.handle(req, res),
+);
+
+// Edição de usuário (nome, status ativo, redefinição de senha).
+usersRoutes.patch(
+  '/:userId',
+  requirePermission('user.update', 'admin.full'),
+  validate({ body: updateUserSchema }),
+  (req, res) => update.handle(req, res),
 );
 
 // Gestão de acesso por empresa (papel × empresa).

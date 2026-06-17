@@ -9,6 +9,7 @@ import {
   listUserRoles,
   listUsers,
   revokeUserRole,
+  updateUser,
   type AppUser,
 } from '@/features/users/users-api';
 import { ApiError } from '@/lib/api';
@@ -29,6 +30,7 @@ const GLOBAL = '__global__';
 export function UsersPage(): React.ReactElement {
   const qc = useQueryClient();
   const [selected, setSelected] = useState<AppUser | null>(null);
+  const [editing, setEditing] = useState<AppUser | null>(null);
 
   const usersQuery = useQuery({ queryKey: ['users'], queryFn: listUsers });
   const rolesQuery = useQuery({ queryKey: ['roles'], queryFn: listRoles });
@@ -119,7 +121,7 @@ export function UsersPage(): React.ReactElement {
             usersQuery.data.map((u) => (
               <div
                 key={u.id}
-                className="grid grid-cols-[1fr_1fr_90px_140px] gap-2 items-center border-b border-border py-2 last:border-0"
+                className="grid grid-cols-[1fr_1fr_80px_auto_auto] gap-2 items-center border-b border-border py-2 last:border-0"
               >
                 <span className="font-medium">{u.fullName}</span>
                 <span className="text-sm text-muted-foreground">{u.email}</span>
@@ -127,8 +129,20 @@ export function UsersPage(): React.ReactElement {
                   {u.isActive ? 'Ativo' : 'Inativo'}
                 </span>
                 <Button
+                  variant={editing?.id === u.id ? 'default' : 'outline'}
+                  onClick={() => {
+                    setEditing(editing?.id === u.id ? null : u);
+                    setSelected(null);
+                  }}
+                >
+                  {editing?.id === u.id ? 'Fechar' : 'Editar'}
+                </Button>
+                <Button
                   variant={selected?.id === u.id ? 'default' : 'outline'}
-                  onClick={() => setSelected(selected?.id === u.id ? null : u)}
+                  onClick={() => {
+                    setSelected(selected?.id === u.id ? null : u);
+                    setEditing(null);
+                  }}
                 >
                   {selected?.id === u.id ? 'Fechar' : 'Gerenciar acesso'}
                 </Button>
@@ -139,6 +153,8 @@ export function UsersPage(): React.ReactElement {
           )}
         </CardContent>
       </Card>
+
+      {editing ? <EditPanel key={editing.id} user={editing} onClose={() => setEditing(null)} /> : null}
 
       {selected ? (
         <AccessPanel
@@ -152,6 +168,92 @@ export function UsersPage(): React.ReactElement {
         />
       ) : null}
     </div>
+  );
+}
+
+function EditPanel({ user, onClose }: { user: AppUser; onClose: () => void }): React.ReactElement {
+  const qc = useQueryClient();
+  const [fullName, setFullName] = useState(user.fullName);
+  const [active, setActive] = useState(user.isActive);
+  const [password, setPassword] = useState('');
+  const [erro, setErro] = useState<string | null>(null);
+  const [ok, setOk] = useState(false);
+
+  const salvarMut = useMutation({
+    mutationFn: () => {
+      const payload: { fullName?: string; active?: boolean; password?: string } = {};
+      if (fullName !== user.fullName) payload.fullName = fullName;
+      if (active !== user.isActive) payload.active = active;
+      if (password) payload.password = password;
+      return updateUser(user.id, payload);
+    },
+    onSuccess: () => {
+      setErro(null);
+      setOk(true);
+      setPassword('');
+      void qc.invalidateQueries({ queryKey: ['users'] });
+    },
+    onError: (e) => {
+      setOk(false);
+      setErro(e instanceof ApiError ? e.message : 'Falha ao salvar');
+    },
+  });
+
+  const nothingChanged = fullName === user.fullName && active === user.isActive && !password;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Editar {user.email}</CardTitle>
+        <CardDescription>
+          Atualize o nome, ative/inative o acesso ou redefina a senha. Deixe a senha em branco para
+          mantê-la.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form
+          className="grid grid-cols-[1fr_1fr_auto_auto] gap-2 items-end"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!nothingChanged) salvarMut.mutate();
+          }}
+        >
+          <div className="space-y-1">
+            <Label className="text-xs">Nome completo</Label>
+            <Input value={fullName} onChange={(e) => setFullName(e.target.value)} required />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Nova senha (opcional)</Label>
+            <Input
+              type="password"
+              value={password}
+              placeholder="manter atual"
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Status</Label>
+            <Select value={active ? '1' : '0'} onChange={(e) => setActive(e.target.value === '1')}>
+              <option value="1">Ativo</option>
+              <option value="0">Inativo</option>
+            </Select>
+          </div>
+          <div className="flex gap-2">
+            <Button type="submit" disabled={nothingChanged || salvarMut.isPending}>
+              {salvarMut.isPending ? 'Salvando…' : 'Salvar'}
+            </Button>
+            <Button type="button" variant="outline" onClick={onClose}>
+              Fechar
+            </Button>
+          </div>
+        </form>
+        {erro ? <p className="mt-2 text-sm text-destructive">{erro}</p> : null}
+        {ok ? <p className="mt-2 text-sm text-emerald-600">Alterações salvas.</p> : null}
+        <p className="mt-2 text-xs text-muted-foreground">
+          Senha: mínimo 8 caracteres, com maiúscula, minúscula e número.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 

@@ -35,6 +35,17 @@ export async function createUser(payload: CreateUserPayload): Promise<AppUser> {
   return api<AppUser>('/users', { method: 'POST', body: payload });
 }
 
+export interface UpdateUserPayload {
+  fullName?: string;
+  active?: boolean;
+  /** Quando enviada, redefine a senha. Ausente = mantém a atual. */
+  password?: string;
+}
+
+export async function updateUser(userId: string, payload: UpdateUserPayload): Promise<AppUser> {
+  return api<AppUser>(`/users/${userId}`, { method: 'PATCH', body: payload });
+}
+
 export async function listRoles(): Promise<Role[]> {
   return api<Role[]>('/users/roles');
 }
