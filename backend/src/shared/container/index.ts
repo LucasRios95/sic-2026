@@ -72,6 +72,7 @@ import { env } from '@config/env';
 import { ICertificateVault } from './providers/CertificateVault/ICertificateVault';
 import { FileSystemCertificateVault } from './providers/CertificateVault/implementations/FileSystemCertificateVault';
 import { InMemoryCertificateVault } from './providers/CertificateVault/implementations/InMemoryCertificateVault';
+import { PostgresCertificateVault } from './providers/CertificateVault/implementations/PostgresCertificateVault';
 import { IDocumentStorage } from './providers/DocumentStorage/IDocumentStorage';
 import { FileSystemDocumentStorage } from './providers/DocumentStorage/implementations/FileSystemDocumentStorage';
 import { IHashProvider } from './providers/HashProvider/IHashProvider';
@@ -200,6 +201,13 @@ export function registerDependencies(): void {
     container.registerSingleton<ICertificateVault>(
       'CertificateVault',
       FileSystemCertificateVault,
+    );
+  } else if (env.VAULT_DRIVER === 'db') {
+    // Cofre no Postgres — para nuvem (Railway), onde filesystem é efêmero e volumes não
+    // são compartilhados entre backend e worker.
+    container.registerSingleton<ICertificateVault>(
+      'CertificateVault',
+      PostgresCertificateVault,
     );
   } else {
     container.registerSingleton<ICertificateVault>(

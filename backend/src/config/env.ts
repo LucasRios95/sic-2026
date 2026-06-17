@@ -40,7 +40,7 @@ const envSchema = z.object({
   QUEUE_PREFIX: z.string().min(1).default('sic2026'),
 
   // --- Cofre de segredos ---
-  VAULT_DRIVER: z.enum(['memory', 'filesystem']).default('memory'),
+  VAULT_DRIVER: z.enum(['memory', 'filesystem', 'db']).default('memory'),
   VAULT_PATH: z.string().default('./tmp/vault'),
   // 32 bytes em base64 (44 chars). Validamos só o tamanho mínimo; a leitura real do segredo
   // ocorre no adapter e falha com mensagem específica se for inválida.
