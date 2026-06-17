@@ -54,6 +54,11 @@ const envSchema = z.object({
   STORAGE_DRIVER: z.enum(['filesystem', 's3']).default('filesystem'),
   STORAGE_PATH: z.string().default('./tmp/docs'),
 
+  // --- Serviço único (Railway): o backend também serve o build do frontend (SPA) ---
+  // Caminho do `dist` do frontend dentro da imagem. Vazio = desligado (dev/on-premise,
+  // onde o nginx serve o front). Setado pelo Dockerfile da raiz (ex.: /app/public).
+  SERVE_FRONTEND_DIR: z.string().optional().default(''),
+
   // --- Validação XSD da NF-e (antes de assinar/transmitir) ---
   // block: XML inválido vira rejeição local, sem ir à SEFAZ (default).
   // warn:  loga os erros mas transmite mesmo assim (observação).

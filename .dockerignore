@@ -1,0 +1,13 @@
+# Contexto do Dockerfile da RAIZ (serviço único Railway). Enxuga o que o build vê;
+# o Dockerfile só usa backend/ e frontend/.
+**/node_modules
+**/dist
+releases/
+docs/
+scripts/
+*.md
+docker-compose*.yml
+.git
+backend/tmp/
+**/.env
+**/*.log

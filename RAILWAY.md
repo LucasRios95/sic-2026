@@ -1,23 +1,36 @@
 # Deploy no Railway (acesso web)
 
 Runbook para publicar o SIC NF-e no Railway. Decisões adotadas:
-- **Vault de certificados**: **driver de banco** (`VAULT_DRIVER=db`) — o certificado A1 é cifrado (AES-256-GCM) e guardado no Postgres, então backend e worker compartilham o cofre sem depender de volume (ideal para nuvem). *(Implementado nesta entrega; substitui o MVP de volume.)*
-- **Frontend ↔ backend**: nginx faz proxy de `/api` via **rede privada** do Railway (backend **não** público).
+- **Serviço único**: um `Dockerfile` na RAIZ builda o frontend e o embute no backend; o **backend (Node) serve a API + o SPA numa porta só**. No Railway = **1 serviço de app + Postgres + Redis** (2 plugins). *(Implementado: `Dockerfile` + `railway.json` na raiz; o backend serve `/app/public` quando `SERVE_FRONTEND_DIR` está setado — validado localmente.)*
+- **Vault de certificados**: `VAULT_DRIVER=db` (cofre A1 cifrado AES-256-GCM no Postgres) — sem volume, sobrevive a deploys.
+- **mTLS SEFAZ**: bundle ICP-Brasil embarcado em `backend/certs/icp-brasil.pem`.
 - **Finalidade**: produção real do cliente.
 
-> ⚠️ Pré-requisito de conhecimento: Railway cobra por uso (5 cargas rodando 24/7). É um sistema fiscal exposto na internet — use segredos fortes e troque a senha do admin no 1º login.
+> ⚠️ Railway cobra por uso. Sistema fiscal exposto na internet — use segredos fortes e troque a senha do admin no 1º login.
 
-## Arquitetura no Railway
+## Arquitetura (serviço único)
 
 | Componente | Como |
 |---|---|
-| Postgres | **Plugin gerenciado** (Railway → Add → Database → PostgreSQL) |
+| **app** | 1 serviço do repo, **Root Directory = raiz (vazio)**, builder Dockerfile (raiz). Serve API + SPA. **Tem domínio público.** |
+| Postgres | **Plugin gerenciado** (Add → Database → PostgreSQL) |
 | Redis | **Plugin gerenciado** (Add → Database → Redis) |
-| `backend` | Serviço do repo, Root Directory = `backend`, Dockerfile = `Dockerfile.prod` |
-| `worker` | 2º serviço, mesmo repo/Root `backend`, **Start Command** = worker |
-| `frontend` | Serviço do repo, Root Directory = `frontend`, Dockerfile = `Dockerfile.prod` (público) |
 
-Migrations + seed rodam como **Pre-Deploy Command** do backend (não há serviço `migrate` separado no Railway).
+O `railway.json` da raiz já define builder Dockerfile, **Pre-Deploy** (migrations + seed) e healthcheck `/health`. O worker (filas) é **opcional** — fica para depois.
+
+## Passo a passo (serviço único)
+1. **New Project → Deploy from GitHub repo** → `sic-2026` (o serviço aponta para a **raiz**, sem Root Directory).
+2. **Add → Database → PostgreSQL** e **Add → Database → Redis**.
+3. No serviço do app, **Variables**: cole o bloco de env de baixo (seção "Variáveis"), com 2 detalhes:
+   - **NÃO** setar `PORT` (o Railway injeta a porta pública; o app escuta nela).
+   - `CORS_ALLOWED_ORIGINS` = o **domínio público deste serviço** (preencha após gerar o domínio).
+   - Pode **ignorar** `BACKEND_UPSTREAM`/`NGINX_RESOLVER` (são só do modo multi-serviço/nginx).
+4. **Settings → Networking → Generate Domain** → esse é o endereço de acesso.
+5. **Restaurar o dump** no Postgres do Railway (ver seção "Restaurar os dados").
+6. **Reenviar o PFX** em Administração → Certificados (vault `db` começa vazio).
+7. Login `admin@sic.local / Admin@123` → **trocar a senha**.
+
+> Se o build falhar com "Railpack could not determine how to build" → o serviço está sem o `railway.json`/Dockerfile no Root. Garanta que o **Root Directory está vazio (raiz)** — lá estão o `Dockerfile` e o `railway.json`.
 
 ## Mudanças no repositório
 
@@ -28,7 +41,9 @@ Já aplicadas:
 
 Nada mais de código é obrigatório.
 
-## Passo a passo
+## (Alternativa) Multi-serviço
+
+> Só use se quiser backend/worker/frontend separados (escala independente). O caminho padrão é o **serviço único** acima.
 
 ### 1. Projeto + repo
 1. Suba o repositório para o GitHub (o Railway builda a partir dele).

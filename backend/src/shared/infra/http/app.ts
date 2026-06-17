@@ -4,6 +4,8 @@ import 'reflect-metadata';
 // `shared/types/express.d.ts`. Não importamos o arquivo aqui de propósito — o tsc
 // já o carrega via `tsconfig.include` (que casa com .d.ts), e o tsx em runtime
 // ignora arquivos .d.ts. Importar explicitamente quebra o tsx.
+import path from 'node:path';
+
 import cors from 'cors';
 import express, { Express } from 'express';
 import helmet from 'helmet';
@@ -45,6 +47,28 @@ export function createApp(): Express {
   app.use(requestContextMiddleware);
 
   app.use(router);
+  // Alias `/api` para as MESMAS rotas. No modo serviço único (Railway) o próprio backend
+  // serve o SPA e o front chama `/api/*` (mesma origem). No on-premise/dev o nginx faz o
+  // strip de `/api` e usa as rotas na raiz — então este alias fica ocioso lá, sem efeito.
+  app.use('/api', router);
+
+  // Serviço único (Railway): o backend também serve o build estático do frontend (SPA).
+  // Ativado só quando SERVE_FRONTEND_DIR aponta para o `dist` (setado no Dockerfile da raiz).
+  // No on-premise/dev fica desligado (o nginx serve o front). Precisa vir DEPOIS das rotas
+  // de API e ANTES do errorHandler.
+  if (env.SERVE_FRONTEND_DIR) {
+    const dist = path.resolve(env.SERVE_FRONTEND_DIR);
+    app.use(express.static(dist));
+    // Fallback de SPA: qualquer GET que não seja de API e não casou com arquivo estático
+    // devolve o index.html (o TanStack Router resolve a rota no cliente).
+    app.use((req, res, next) => {
+      if (req.method === 'GET' && !req.path.startsWith('/api')) {
+        res.sendFile(path.join(dist, 'index.html'));
+      } else {
+        next();
+      }
+    });
+  }
 
   // Express 5 propaga erros async automaticamente para o middleware abaixo.
   app.use(errorHandler);
