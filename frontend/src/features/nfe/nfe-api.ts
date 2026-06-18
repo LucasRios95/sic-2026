@@ -317,6 +317,7 @@ export interface SimulateTaxPayload {
     productId: string;
     quantidade: string;
     valorUnitario: string;
+    valorDesconto?: string;
     cfop: string;
   }>;
 }

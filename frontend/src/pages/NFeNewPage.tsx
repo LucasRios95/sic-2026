@@ -40,6 +40,8 @@ interface ItemRow {
   cfop: string;
   quantidade: string;
   valorUnitario: string;
+  /** Desconto do item (valor absoluto, em reais). Vazio/0 = sem desconto. */
+  valorDesconto: string;
   /** Override do código de ICMS (CSOSN p/ Simples, CST p/ Normal). Vazio = usa a regra do produto. */
   icmsCodigo: string;
 }
@@ -51,8 +53,14 @@ const makeRow = (): ItemRow => ({
   cfop: '5102',
   quantidade: '1',
   valorUnitario: '0.00',
+  valorDesconto: '0.00',
   icmsCodigo: '',
 });
+
+/** Normaliza o desconto: só envia quando > 0 (evita mandar "0.00" à toa). */
+function descontoOuUndefined(v: string): string | undefined {
+  return Number(v) > 0 ? v : undefined;
+}
 
 /** CSOSN (Simples Nacional) — código + descrição curta. */
 const CSOSN_OPCOES: ReadonlyArray<[string, string]> = [
@@ -300,6 +308,7 @@ export function NFeNewPage(): React.ReactElement {
           cfop: it.cfop,
           quantidade: it.quantidadeComercial,
           valorUnitario: it.valorUnitario,
+          valorDesconto: it.valorDesconto ?? '0.00',
           icmsCodigo: '', // reemissão usa o código da regra vigente do produto
         })),
       );
@@ -324,6 +333,7 @@ export function NFeNewPage(): React.ReactElement {
         productId: it.productId,
         quantidade: it.quantidade,
         valorUnitario: it.valorUnitario,
+        valorDesconto: descontoOuUndefined(it.valorDesconto),
         cfop: it.cfop,
       })),
     };
@@ -404,6 +414,7 @@ export function NFeNewPage(): React.ReactElement {
             unidadeComercial: productCacheRef.current[it.productId]?.unidadeComercial ?? 'UN',
             quantidade: it.quantidade,
             valorUnitario: it.valorUnitario,
+            valorDesconto: descontoOuUndefined(it.valorDesconto),
             // Override do código de ICMS, conforme o regime da empresa. Vazio = usa a regra.
             ...(it.icmsCodigo
               ? isSimples
@@ -710,7 +721,7 @@ export function NFeNewPage(): React.ReactElement {
           {items.map((row, idx) => (
             <div
               key={row.id}
-              className="grid grid-cols-[1fr_70px_70px_110px_150px_40px] gap-2 items-end border-b border-border pb-2 last:border-0"
+              className="grid grid-cols-[1fr_64px_56px_96px_88px_130px_32px] gap-2 items-end border-b border-border pb-2 last:border-0"
             >
               <div className="space-y-1">
                 <Label className="text-xs">Produto #{idx + 1}</Label>
@@ -743,6 +754,14 @@ export function NFeNewPage(): React.ReactElement {
                 <Input
                   value={row.valorUnitario}
                   onChange={(e) => updateItem(row.id, { valorUnitario: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Desc.</Label>
+                <Input
+                  value={row.valorDesconto}
+                  onChange={(e) => updateItem(row.id, { valorDesconto: e.target.value })}
+                  title="Desconto do item (R$)"
                 />
               </div>
               <div className="space-y-1">

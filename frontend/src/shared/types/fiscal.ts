@@ -105,6 +105,7 @@ export interface NFeItem {
   quantidadeComercial: string;
   valorUnitario: string;
   valorTotal: string;
+  valorDesconto?: string | null;
   aliqIcms?: string | null;
   valorIcms?: string | null;
 }
