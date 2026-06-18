@@ -732,6 +732,9 @@ export class EmitirNFeUseCase {
     formaEmissao: FormaEmissao,
   ): NFeDocument {
     const operacaoInterestadual = customer.uf !== company.uf;
+    // Só emite vDesc/vFrete/vSeg/vOutro no item quando > 0 (evita zeros no XML).
+    const positivo = (v?: string | null): string | undefined =>
+      v && Number(v) > 0 ? v : undefined;
     return {
       chaveAcesso,
       identificacao: {
@@ -816,6 +819,10 @@ export class EmitirNFeUseCase {
           quantidadeComercial: src.quantidade,
           valorUnitario: src.valorUnitario,
           valorTotal: r.valorTotal,
+          valorDesconto: positivo(src.valorDesconto),
+          valorFrete: positivo(src.valorFrete),
+          valorSeguro: positivo(src.valorSeguro),
+          valorOutros: positivo(src.valorOutros),
           unidadeTributavel: src.unidadeComercial,
           quantidadeTributavel: src.quantidade,
           valorUnitarioTrib: src.valorUnitario,

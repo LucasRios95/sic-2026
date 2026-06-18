@@ -10,7 +10,6 @@ import { CalculadoraIpi } from './calculadoras/CalculadoraIpi';
 import { CalculadoraPisCofins } from './calculadoras/CalculadoraPisCofins';
 import { ContextoCalculo, ItemContexto } from './domain/ContextoCalculo';
 import { ICalculadoraTributo } from './domain/ICalculadoraTributo';
-import { baseDefaultItem } from './domain/item-utils';
 import {
   PassoMemoria,
   ResultadoCalculoDocumento,
@@ -69,7 +68,11 @@ export class MotorTributario {
     contexto: ContextoCalculo,
     item: ItemContexto,
   ): Promise<ResultadoCalculoItem> {
-    const valorTotal = baseDefaultItem(item).round(2).toString(2);
+    // vProd é o valor BRUTO do item (qCom × vUnCom). Desconto/frete/seguro/outros vão em
+    // campos próprios (vDesc/vFrete/vSeg/vOutro) e NÃO entram no vProd — senão a SEFAZ
+    // rejeita com cStat 629 (vProd ≠ vUnCom × qCom). A base de cálculo dos tributos
+    // continua sendo `baseDefaultItem` (líquida) dentro de cada calculadora.
+    const valorTotal = new Money(item.quantidade).mul(item.valorUnitario).round(2).toString(2);
     const result: ResultadoCalculoItem = {
       itemId: item.itemId,
       valorTotal,
