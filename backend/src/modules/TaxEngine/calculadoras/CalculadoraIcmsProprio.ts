@@ -30,8 +30,15 @@ export class CalculadoraIcmsProprio implements ICalculadoraTributo {
     private readonly interstate: IInterstateAliquotRepository,
   ) {}
 
-  aplica(contexto: ContextoCalculo, _item: ItemContexto): boolean {
-    return contexto.empresa.flags.usaIcms;
+  aplica(contexto: ContextoCalculo, item: ItemContexto): boolean {
+    if (!contexto.empresa.flags.usaIcms) return false;
+    // Simples Nacional NÃO destaca ICMS próprio: o item vira grupo ICMSSN (CSOSN) e o
+    // imposto é recolhido no DAS. Logo ICMSTot.vICMS tem que ser 0 — se calcularmos aqui,
+    // o total diverge do somatório dos itens (item ICMSSN não tem vICMS) e a SEFAZ rejeita
+    // com cStat 532. O crédito do SN (CSOSN 101/201) é outro conceito (vCredICMSSN), não
+    // entra no vICMS e fica para uma calculadora dedicada.
+    if (item.taxRule.csosnIcms) return false;
+    return true;
   }
 
   async calcular(contexto: ContextoCalculo, item: ItemContexto): Promise<CalculadoraSlice> {
