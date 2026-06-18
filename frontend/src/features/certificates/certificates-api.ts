@@ -33,6 +33,14 @@ export async function revokeCertificate(id: string): Promise<void> {
   });
 }
 
+/** Exclusão definitiva: remove a linha do sistema e purga o conteúdo do cofre. */
+export async function deleteCertificate(id: string): Promise<void> {
+  await api<void>(`/certificates/${id}/permanent`, {
+    method: 'DELETE',
+    companyId: companyOrThrow(),
+  });
+}
+
 /**
  * Converte File de input[type=file] para base64 puro (sem o prefixo `data:...,`).
  * O backend recebe assim e decodifica para Buffer.

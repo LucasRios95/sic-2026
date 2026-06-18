@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import {
+  deleteCertificate,
   fileToBase64,
   listCertificates,
   revokeCertificate,
@@ -61,6 +62,15 @@ export function CertificatesPage(): React.ReactElement {
     mutationFn: revokeCertificate,
     onSuccess: () => {
       setRevokeTarget(null);
+      void queryClient.invalidateQueries({ queryKey: ['certificates'] });
+    },
+  });
+
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const deleteMutation = useMutation({
+    mutationFn: deleteCertificate,
+    onSuccess: () => {
+      setDeleteTarget(null);
       void queryClient.invalidateQueries({ queryKey: ['certificates'] });
     },
   });
@@ -161,11 +171,16 @@ export function CertificatesPage(): React.ReactElement {
                     {cert.tipo} · {cert.commonName} · Serial {cert.serialNumber}
                   </CardDescription>
                 </div>
-                {cert.active ? (
-                  <Button variant="destructive" onClick={() => setRevokeTarget(cert.id)}>
-                    Revogar
+                <div className="flex items-center gap-2">
+                  {cert.active ? (
+                    <Button variant="outline" onClick={() => setRevokeTarget(cert.id)}>
+                      Revogar
+                    </Button>
+                  ) : null}
+                  <Button variant="destructive" onClick={() => setDeleteTarget(cert.id)}>
+                    Excluir
                   </Button>
-                ) : null}
+                </div>
               </CardHeader>
               <CardContent className="text-sm text-muted-foreground space-y-1">
                 <div>
@@ -193,6 +208,22 @@ export function CertificatesPage(): React.ReactElement {
         <p className="text-sm">
           Confirme que quer revogar este certificado. Em caso de erro, será necessário
           re-uploadar o PFX original.
+        </p>
+      </Modal>
+
+      <Modal
+        open={!!deleteTarget}
+        title="Excluir certificado"
+        description="Remove o certificado do sistema (a linha some da lista) e apaga o conteúdo do cofre."
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget)}
+        confirmLabel="Excluir"
+        destructive
+        loading={deleteMutation.isPending}
+      >
+        <p className="text-sm">
+          Ação definitiva. NF-e já emitidas não são afetadas. Para emitir de novo, basta
+          carregar outro certificado A1 acima.
         </p>
       </Modal>
     </div>

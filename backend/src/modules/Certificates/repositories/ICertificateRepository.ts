@@ -35,4 +35,6 @@ export interface ICertificateRepository {
    */
   listExpiring(daysAhead: number): Promise<Certificate[]>;
   revoke(id: string, revokedBy: string): Promise<void>;
+  /** Remoção definitiva da linha (hard delete). O conteúdo do cofre é purgado pelo use case. */
+  delete(companyId: string, id: string): Promise<void>;
 }

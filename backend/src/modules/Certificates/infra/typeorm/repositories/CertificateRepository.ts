@@ -86,4 +86,8 @@ export class CertificateRepository implements ICertificateRepository {
       { active: false, revokedAt: new Date(), revokedBy },
     );
   }
+
+  async delete(companyId: string, id: string): Promise<void> {
+    await this.repo.delete({ id, companyId });
+  }
 }

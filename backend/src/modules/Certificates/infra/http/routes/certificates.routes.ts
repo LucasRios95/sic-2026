@@ -1,5 +1,6 @@
 import { Router } from 'express';
 
+import { DeleteCertificateController } from '@modules/Certificates/useCases/DeleteCertificate/DeleteCertificateController';
 import { ListCertificatesController } from '@modules/Certificates/useCases/ListCertificates/ListCertificatesController';
 import { RevokeCertificateController } from '@modules/Certificates/useCases/RevokeCertificate/RevokeCertificateController';
 import { UploadCertificateController } from '@modules/Certificates/useCases/UploadCertificate/UploadCertificateController';
@@ -15,6 +16,7 @@ export const certificatesRoutes = Router();
 const uploadController = new UploadCertificateController();
 const listController = new ListCertificatesController();
 const revokeController = new RevokeCertificateController();
+const deleteController = new DeleteCertificateController();
 
 certificatesRoutes.use(requireAuth, tenantContext({ required: true }));
 
@@ -37,4 +39,11 @@ certificatesRoutes.delete(
   '/:id',
   requirePermission('vault.write', 'admin.full'),
   (req, res) => revokeController.handle(req, res),
+);
+// Exclusão definitiva (hard delete) — remove a linha + purga o cofre. `/:id/permanent`
+// para não colidir com a revogação acima.
+certificatesRoutes.delete(
+  '/:id/permanent',
+  requirePermission('vault.write', 'admin.full'),
+  (req, res) => deleteController.handle(req, res),
 );
