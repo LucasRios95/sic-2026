@@ -83,6 +83,7 @@ export interface EmitirNFeItemPayload {
   quantidade: string;
   valorUnitario: string;
   valorDesconto?: string;
+  valorFrete?: string;
   /**
    * Override do código de ICMS do item, conforme o regime da empresa: `csosnIcms` (3 díg.)
    * para Simples Nacional, `cstIcms` (2 díg.) para Regime Normal. Omitido = usa a regra do
@@ -318,6 +319,7 @@ export interface SimulateTaxPayload {
     quantidade: string;
     valorUnitario: string;
     valorDesconto?: string;
+    valorFrete?: string;
     cfop: string;
   }>;
 }

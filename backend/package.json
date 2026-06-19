@@ -20,6 +20,7 @@
     "migration:show": "npm run typeorm -- migration:show",
     "seed": "tsx src/shared/infra/typeorm/seeds/run-seeds.ts",
     "import:legacy": "tsx src/shared/infra/typeorm/seeds/legacy-import/index.ts",
+    "import:canguera": "tsx src/shared/infra/typeorm/seeds/legacy-import-canguera/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

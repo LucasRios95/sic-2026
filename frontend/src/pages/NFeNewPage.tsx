@@ -42,6 +42,8 @@ interface ItemRow {
   valorUnitario: string;
   /** Desconto do item (valor absoluto, em reais). Vazio/0 = sem desconto. */
   valorDesconto: string;
+  /** Frete do item (valor absoluto, em reais). Vazio/0 = sem frete. Soma no vFrete da nota. */
+  valorFrete: string;
   /** Override do código de ICMS (CSOSN p/ Simples, CST p/ Normal). Vazio = usa a regra do produto. */
   icmsCodigo: string;
 }
@@ -54,11 +56,12 @@ const makeRow = (): ItemRow => ({
   quantidade: '1',
   valorUnitario: '0.00',
   valorDesconto: '0.00',
+  valorFrete: '0.00',
   icmsCodigo: '',
 });
 
-/** Normaliza o desconto: só envia quando > 0 (evita mandar "0.00" à toa). */
-function descontoOuUndefined(v: string): string | undefined {
+/** Normaliza um valor monetário opcional: só envia quando > 0 (evita mandar "0.00" à toa). */
+function valorPositivoOuUndefined(v: string): string | undefined {
   return Number(v) > 0 ? v : undefined;
 }
 
@@ -309,6 +312,7 @@ export function NFeNewPage(): React.ReactElement {
           quantidade: it.quantidadeComercial,
           valorUnitario: it.valorUnitario,
           valorDesconto: it.valorDesconto ?? '0.00',
+          valorFrete: it.valorFrete ?? '0.00',
           icmsCodigo: '', // reemissão usa o código da regra vigente do produto
         })),
       );
@@ -333,7 +337,8 @@ export function NFeNewPage(): React.ReactElement {
         productId: it.productId,
         quantidade: it.quantidade,
         valorUnitario: it.valorUnitario,
-        valorDesconto: descontoOuUndefined(it.valorDesconto),
+        valorDesconto: valorPositivoOuUndefined(it.valorDesconto),
+        valorFrete: valorPositivoOuUndefined(it.valorFrete),
         cfop: it.cfop,
       })),
     };
@@ -414,7 +419,8 @@ export function NFeNewPage(): React.ReactElement {
             unidadeComercial: productCacheRef.current[it.productId]?.unidadeComercial ?? 'UN',
             quantidade: it.quantidade,
             valorUnitario: it.valorUnitario,
-            valorDesconto: descontoOuUndefined(it.valorDesconto),
+            valorDesconto: valorPositivoOuUndefined(it.valorDesconto),
+            valorFrete: valorPositivoOuUndefined(it.valorFrete),
             // Override do código de ICMS, conforme o regime da empresa. Vazio = usa a regra.
             ...(it.icmsCodigo
               ? isSimples
@@ -721,7 +727,7 @@ export function NFeNewPage(): React.ReactElement {
           {items.map((row, idx) => (
             <div
               key={row.id}
-              className="grid grid-cols-[1fr_64px_56px_96px_88px_130px_32px] gap-2 items-end border-b border-border pb-2 last:border-0"
+              className="grid grid-cols-[1fr_64px_56px_96px_88px_88px_130px_32px] gap-2 items-end border-b border-border pb-2 last:border-0"
             >
               <div className="space-y-1">
                 <Label className="text-xs">Produto #{idx + 1}</Label>
@@ -762,6 +768,14 @@ export function NFeNewPage(): React.ReactElement {
                   value={row.valorDesconto}
                   onChange={(e) => updateItem(row.id, { valorDesconto: e.target.value })}
                   title="Desconto do item (R$)"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Frete</Label>
+                <Input
+                  value={row.valorFrete}
+                  onChange={(e) => updateItem(row.id, { valorFrete: e.target.value })}
+                  title="Frete do item (R$) — soma no vFrete da nota"
                 />
               </div>
               <div className="space-y-1">

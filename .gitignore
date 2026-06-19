@@ -52,4 +52,5 @@ releases/
 
 # Dumps de banco de dados (nao versionar - podem conter dados reais)
 docs/Dump*.sql
+dumps/
 *.dump
