@@ -127,7 +127,7 @@ nfeRoutes.post(
   requirePermission('nfe.read', 'nfe.emit', 'admin.full'),
   (req, res) => danfeController.handle(req, res),
 );
-// Download do XML (procNFe quando autorizada, NFe assinada nos demais status com XML).
+// Download do XML fiscal (<chave>.xml; nfeProc quando autorizada, NFe assinada nos demais).
 nfeRoutes.get(
   '/:id/xml',
   requirePermission('nfe.read', 'nfe.emit', 'admin.full'),

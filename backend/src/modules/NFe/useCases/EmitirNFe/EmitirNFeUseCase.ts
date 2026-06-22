@@ -8,16 +8,16 @@ import { ICustomerRepository } from '@modules/Customers/repositories/ICustomerRe
 import { NotificationService } from '@modules/Notifications/NotificationService';
 import { IProductRepository } from '@modules/Products/repositories/IProductRepository';
 import { IProductTaxRuleRepository } from '@modules/Products/repositories/IProductTaxRuleRepository';
-import { SefazHealthMonitorService } from '@modules/SefazHealth/SefazHealthMonitorService';
 import { SefazHealthState } from '@modules/SefazHealth/domain/sefaz-health-enums';
+import { SefazHealthMonitorService } from '@modules/SefazHealth/SefazHealthMonitorService';
 import { ContextoCalculo } from '@modules/TaxEngine/domain/ContextoCalculo';
 import { MotorTributario } from '@modules/TaxEngine/MotorTributario';
 import { CertificateAccessor } from '@shared/container/providers/CertificateVault/CertificateAccessor';
 import { BusinessRuleError, IntegrationError, NotFoundError } from '@shared/errors';
 import { logger } from '@shared/logger';
-
 import { IndicadorIntermediador, IndicadorPresenca } from '@shared/types/fiscal-enums';
 
+import { buildNfeProcXml } from '../../domain/authorized-xml';
 import { ChaveAcesso } from '../../domain/ChaveAcesso';
 import {
   DocumentStatus,
@@ -28,11 +28,11 @@ import {
 } from '../../domain/nfe-enums';
 import { NFeDocument, NFeItem as NFeItemDoc } from '../../domain/NFeDocument';
 import { NFeXmlBuilder } from '../../domain/NFeXmlBuilder';
-import { NFe } from '../../infra/typeorm/entities/NFe';
-import { NFeSchemaValidator } from '../../infra/validation/NFeSchemaValidator';
 import { SefazEndpoints } from '../../infra/sefaz/SefazEndpoints';
 import { SefazSoapClient } from '../../infra/sefaz/SefazSoapClient';
 import { NFeSigner } from '../../infra/signing/NFeSigner';
+import { NFe } from '../../infra/typeorm/entities/NFe';
+import { NFeSchemaValidator } from '../../infra/validation/NFeSchemaValidator';
 import { INFeRepository } from '../../repositories/INFeRepository';
 import { INumberingSeriesRepository } from '../../repositories/INumberingSeriesRepository';
 
@@ -359,12 +359,12 @@ export class EmitirNFeUseCase {
       },
       itensCtx.map((it, idx) => {
         const r = calculo.itens[idx];
-        const src = (it as unknown as { __sourceItem: typeof request.itens[number] & { product: { codigo: string; ncm: string; cest?: string | null }; taxRule: { cstIcms?: string | null; csosnIcms?: string | null; cstIcmsSt?: string | null; cstIpi?: string | null; cstPis?: string | null; cstCofins?: string | null; }; }; }).__sourceItem;
+        const src = (it as unknown as { __sourceItem: typeof request.itens[number] & { product: { codigo: string; descricao: string; ncm: string; cest?: string | null }; taxRule: { cstIcms?: string | null; csosnIcms?: string | null; cstIcmsSt?: string | null; cstIpi?: string | null; cstPis?: string | null; cstCofins?: string | null; }; }; }).__sourceItem;
         const tr = src.taxRule;
         return {
           numeroItem: src.numeroItem,
           codigo: src.product.codigo,
-          descricao: src.descricao ?? src.product.codigo,
+          descricao: src.descricao ?? src.product.descricao,
           ncm: src.product.ncm,
           cest: src.product.cest ?? null,
           cfop: src.cfop,
@@ -709,7 +709,9 @@ export class EmitirNFeUseCase {
       xMotivo,
       xmlAssinado: signedXml,
       xmlAutorizado:
-        finalStatus === DocumentStatus.AUTHORIZED ? result.responseXml : null,
+        finalStatus === DocumentStatus.AUTHORIZED
+          ? buildNfeProcXml(signedXml, result.responseXml) ?? result.responseXml
+          : null,
       dhAutorizacao: finalStatus === DocumentStatus.AUTHORIZED ? new Date() : null,
       protocoloAutorizacao: extractProtocolo(result.responseXml),
     });
@@ -728,7 +730,7 @@ export class EmitirNFeUseCase {
     customer: NonNullable<Awaited<ReturnType<ICustomerRepository['findById']>>>,
     request: EmitirNFeRequest,
     calculo: Awaited<ReturnType<MotorTributario['calcular']>>,
-    itensCtx: { __sourceItem: EmitirNFeRequest['itens'][number] & { product: { codigo: string; ncm: string; cest?: string | null }; descricao?: string; taxRule: { cstIcms?: string | null; csosnIcms?: string | null; cstIcmsSt?: string | null; cstIpi?: string | null; cEnq?: string | null; cstPis?: string | null; cstCofins?: string | null; modBC?: number | null; pRedBC?: string | null; } } }[],
+    itensCtx: { __sourceItem: EmitirNFeRequest['itens'][number] & { product: { codigo: string; descricao: string; ncm: string; cest?: string | null }; descricao?: string; taxRule: { cstIcms?: string | null; csosnIcms?: string | null; cstIcmsSt?: string | null; cstIpi?: string | null; cEnq?: string | null; cstPis?: string | null; cstCofins?: string | null; modBC?: number | null; pRedBC?: string | null; } } }[],
     formaEmissao: FormaEmissao,
   ): NFeDocument {
     const operacaoInterestadual = customer.uf !== company.uf;
@@ -811,7 +813,7 @@ export class EmitirNFeUseCase {
         return {
           numero: src.numeroItem,
           codigo: src.product.codigo,
-          descricao: src.descricao ?? src.product.codigo,
+          descricao: src.descricao ?? src.product.descricao,
           ncm: src.product.ncm,
           cest: src.product.cest ?? null,
           cfop: src.cfop,

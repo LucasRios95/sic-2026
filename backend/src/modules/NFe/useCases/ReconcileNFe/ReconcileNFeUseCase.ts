@@ -6,9 +6,10 @@ import { NotificationService } from '@modules/Notifications/NotificationService'
 import { NotFoundError } from '@shared/errors';
 import { logger } from '@shared/logger';
 
+import { buildNfeProcXml } from '../../domain/authorized-xml';
 import { DocumentStatus } from '../../domain/nfe-enums';
-import { NFe } from '../../infra/typeorm/entities/NFe';
 import { SefazSoapClient } from '../../infra/sefaz/SefazSoapClient';
+import { NFe } from '../../infra/typeorm/entities/NFe';
 import { INFeRepository } from '../../repositories/INFeRepository';
 
 interface IRequest {
@@ -115,7 +116,9 @@ export class ReconcileNFeUseCase {
       dhAutorizacao:
         newStatus === DocumentStatus.AUTHORIZED ? new Date() : nfe.dhAutorizacao,
       xmlAutorizado:
-        newStatus === DocumentStatus.AUTHORIZED ? result.responseXml : nfe.xmlAutorizado,
+        newStatus === DocumentStatus.AUTHORIZED
+          ? buildNfeProcXml(nfe.xmlAssinado ?? '', result.responseXml) ?? result.responseXml
+          : nfe.xmlAutorizado,
     });
 
     await this.audit.record({

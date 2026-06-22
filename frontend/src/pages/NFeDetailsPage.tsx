@@ -123,7 +123,7 @@ export function NFeDetailsPage(): React.ReactElement {
   // Exclusão local: só status que nunca produziram efeito fiscal na SEFAZ.
   // Espelha a lista do DeleteNFeUseCase.DELETABLE_STATUSES.
   const canDelete = ['DRAFT', 'PENDING', 'SUBMITTED', 'REJECTED', 'ERROR'].includes(nfe.status);
-  // XML disponível: AUTHORIZED traz procNFe (assinado + protocolo). REJECTED/DENIED/SUBMITTED
+  // XML disponível: AUTHORIZED traz o XML fiscal autorizado. REJECTED/DENIED/SUBMITTED
   // costumam ter só o XML assinado — ainda assim útil pra auditoria/reenvio manual.
   const canDownloadXml = ['AUTHORIZED', 'REJECTED', 'DENIED', 'SUBMITTED', 'PROCESSING'].includes(
     nfe.status,
@@ -185,7 +185,7 @@ export function NFeDetailsPage(): React.ReactElement {
               loading={downloadXmlMutation.isPending}
               title={
                 isAuthorized
-                  ? 'Baixa o procNFe (XML assinado + protocolo).'
+                  ? 'Baixa o XML fiscal autorizado.'
                   : 'Baixa o XML da NF-e (sem protocolo — status não-autorizado).'
               }
             >

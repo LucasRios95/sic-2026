@@ -6,6 +6,7 @@ import { IDocumentStorage } from '@shared/container/providers/DocumentStorage/ID
 import { IMailProvider } from '@shared/container/providers/MailProvider/IMailProvider';
 import { BusinessRuleError, NotFoundError, ValidationError } from '@shared/errors';
 
+import { normalizeAuthorizedXml } from '../../domain/authorized-xml';
 import { DocumentStatus } from '../../domain/nfe-enums';
 import { NFe } from '../../infra/typeorm/entities/NFe';
 import { INFeRepository } from '../../repositories/INFeRepository';
@@ -94,10 +95,11 @@ export class SendNFeByEmailUseCase {
         contentType: 'application/pdf',
       },
     ];
-    if (nfe.xmlAutorizado) {
+    const authorizedXml = normalizeAuthorizedXml(nfe.xmlAutorizado, nfe.xmlAssinado);
+    if (authorizedXml) {
       attachments.push({
         filename: `${nfe.chaveAcesso}.xml`,
-        content: Buffer.from(nfe.xmlAutorizado, 'utf8'),
+        content: Buffer.from(authorizedXml, 'utf8'),
         contentType: 'application/xml',
       });
     }
