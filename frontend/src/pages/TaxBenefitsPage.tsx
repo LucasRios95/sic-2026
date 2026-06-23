@@ -60,7 +60,7 @@ export function TaxBenefitsPage(): React.ReactElement {
         style={{ animationDelay: '50ms' }}
       >
         <Info className="h-4 w-4 text-info mt-0.5 shrink-0" />
-        <div className="text-xs text-info-foreground">
+        <div className="text-xs text-foreground">
           O <strong>código do benefício</strong> (<code>cBenef</code>) vai no XML da NF-e
           quando o item é beneficiado. Para benefícios de isenção/redução com desoneração,
           o motor preenche <code>motDesICMS</code> + <code>vICMSDeson</code>

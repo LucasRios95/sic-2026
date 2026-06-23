@@ -41,7 +41,7 @@ export function IcmsStMvaPage(): React.ReactElement {
         style={{ animationDelay: '50ms' }}
       >
         <Info className="h-4 w-4 text-info mt-0.5 shrink-0" />
-        <div className="text-xs text-info-foreground">
+        <div className="text-xs text-foreground">
           Alimentar conforme protocolos Confaz vigentes. Quando não há MVA cadastrada aqui, o
           motor cai para o <code>pMVAST</code> da própria <code>ProductTaxRule</code>. Edição
           via SQL/seed nesta versão.

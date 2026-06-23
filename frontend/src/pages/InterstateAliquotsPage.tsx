@@ -44,7 +44,7 @@ export function InterstateAliquotsPage(): React.ReactElement {
 
       <Card className="p-4 border-info/30 bg-info/5 flex items-start gap-3 animate-fade-in" style={{ animationDelay: '50ms' }}>
         <Info className="h-4 w-4 text-info mt-0.5 shrink-0" />
-        <div className="text-xs text-info-foreground">
+        <div className="text-xs text-foreground">
           <strong>Nacional</strong>: produto/serviço sem similar importado (7% no eixo
           N/NE/CO + ES, 12% no S/SE).<br />
           <strong>Importado</strong>: 4% para mercadoria com conteúdo de importação ≥ 40%

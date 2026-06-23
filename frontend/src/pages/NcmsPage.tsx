@@ -69,7 +69,7 @@ export function NcmsPage(): React.ReactElement {
         style={{ animationDelay: '50ms' }}
       >
         <Info className="h-4 w-4 text-info mt-0.5 shrink-0" />
-        <div className="text-xs text-info-foreground space-y-1">
+        <div className="text-xs text-foreground space-y-1">
           <p>
             Apenas NCMs de <strong>8 dígitos</strong> (nível "NCM completo") são válidos
             no XML da NF-e. Capítulos, posições e sub-posições são nós de hierarquia

@@ -16,8 +16,8 @@ interface LogoProps {
  *  - `full`    → símbolo + texto completo + tagline (tela de login, splash).
  */
 export function Logo({ className, variant = 'compact', onDark = false }: LogoProps) {
-  const sicColor = onDark ? 'text-sidebar-foreground/80' : 'text-slate-300';
-  const nfeColor = 'text-primary';
+  const sicColor = onDark ? 'text-white' : 'text-slate-500';
+  const nfeColor = onDark ? 'text-emerald-400' : 'text-primary';
   const taglineColor = onDark ? 'text-sidebar-muted' : 'text-muted-foreground';
 
   return (
