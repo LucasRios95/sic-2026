@@ -19,7 +19,14 @@ reportsRoutes.use(requireAuth, tenantContext({ required: true }));
 for (const type of types) {
   reportsRoutes.get(
     `/${type}`,
-    requirePermission('nfe.read', 'fin.read', 'fin.*', 'admin.full'),
+    requirePermission(
+      'nfe.read',
+      'entrada.manifest',
+      'entrada.escriturar',
+      'fin.receivable.read',
+      'fin.payable.read',
+      'admin.full',
+    ),
     validate({ query: reportQuerySchema }),
     (req, res) => controller.handle(type, req, res),
   );

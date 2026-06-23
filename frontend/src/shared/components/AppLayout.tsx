@@ -32,6 +32,7 @@ interface NavItem {
   label: string;
   icon: typeof LayoutDashboard;
   requiredPermission?: string;
+  requiredPermissions?: string[];
 }
 
 interface NavGroup {
@@ -56,7 +57,18 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Relatórios',
     items: [
-      { to: '/reports', label: 'Relatórios fiscais', icon: BarChart3, requiredPermission: 'nfe.read' },
+      {
+        to: '/reports',
+        label: 'Relatórios fiscais',
+        icon: BarChart3,
+        requiredPermissions: [
+          'nfe.read',
+          'entrada.manifest',
+          'entrada.escriturar',
+          'fin.receivable.read',
+          'fin.payable.read',
+        ],
+      },
     ],
   },
   {
@@ -106,12 +118,22 @@ export function AppLayout(): React.ReactElement {
 
   const permsSet = new Set(user?.permissions ?? []);
   const hasAdmin = permsSet.has('admin.full');
+  const canAccessItem = (item: NavItem) => {
+    if (hasAdmin) return true;
+
+    const requiredPermissions = [
+      item.requiredPermission,
+      ...(item.requiredPermissions ?? []),
+    ].filter(Boolean) as string[];
+
+    if (requiredPermissions.length === 0) return true;
+
+    return requiredPermissions.some((permission) => permsSet.has(permission));
+  };
 
   const visibleGroups = NAV_GROUPS.map((group) => ({
     ...group,
-    items: group.items.filter(
-      (item) => !item.requiredPermission || hasAdmin || permsSet.has(item.requiredPermission),
-    ),
+    items: group.items.filter((item) => canAccessItem(item)),
   })).filter((group) => group.items.length > 0);
 
   async function handleLogout(): Promise<void> {

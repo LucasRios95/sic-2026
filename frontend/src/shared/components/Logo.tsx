@@ -19,6 +19,8 @@ export function Logo({ className, variant = 'compact', onDark = false }: LogoPro
   const sicColor = onDark ? 'text-white' : 'text-slate-500';
   const nfeColor = onDark ? 'text-emerald-400' : 'text-primary';
   const taglineColor = onDark ? 'text-sidebar-muted' : 'text-muted-foreground';
+  const sicStyle = onDark ? { color: '#ffffff' } : undefined;
+  const nfeStyle = onDark ? { color: '#34d399' } : undefined;
 
   return (
     <div className={cn('inline-flex items-center gap-3', className)}>
@@ -26,8 +28,12 @@ export function Logo({ className, variant = 'compact', onDark = false }: LogoPro
       {variant !== 'mark' && (
         <div className="flex flex-col leading-none">
           <div className="flex items-baseline gap-1.5 font-bold tracking-tight">
-            <span className={cn('text-2xl', sicColor)}>SIC</span>
-            <span className={cn('text-2xl', nfeColor)}>NFe</span>
+            <span className={cn('text-2xl', sicColor)} style={sicStyle}>
+              SIC
+            </span>
+            <span className={cn('text-2xl', nfeColor)} style={nfeStyle}>
+              NFe
+            </span>
           </div>
           {variant === 'full' && (
             <p

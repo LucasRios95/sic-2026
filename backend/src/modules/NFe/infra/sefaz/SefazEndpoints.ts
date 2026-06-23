@@ -86,6 +86,11 @@ const SVC_RS_BASE = {
   [AmbienteSefaz.PRODUCAO]: 'https://nfe.svrs.rs.gov.br/ws',
 };
 
+const DISTRIBUICAO_DFE_BASE = {
+  [AmbienteSefaz.HOMOLOGACAO]: 'https://hom1.nfe.fazenda.gov.br/NFeDistribuicaoDFe',
+  [AmbienteSefaz.PRODUCAO]: 'https://www1.nfe.fazenda.gov.br/NFeDistribuicaoDFe',
+};
+
 export interface EndpointResolution {
   url: string;
   autorizadora: string;
@@ -122,9 +127,8 @@ export class SefazEndpoints {
   ): EndpointResolution {
     // Distribuição DF-e tem domínio próprio (ambiente nacional, não por UF).
     if (service === 'NFeDistribuicaoDFe') {
-      const base = ENDPOINT_BASE.SVRS[ambiente];
       return {
-        url: `${base}/${service}.asmx`,
+        url: `${DISTRIBUICAO_DFE_BASE[ambiente]}/${service}.asmx`,
         autorizadora: 'NACIONAL',
         contingenciaSvc: false,
       };

@@ -27,10 +27,20 @@ describe('SefazEndpoints', () => {
     ).toBe('SVAN');
   });
 
-  it('Distribuição DF-e usa ambiente nacional (SVRS)', () => {
+  it('Distribuição DF-e usa ambiente nacional próprio', () => {
     const r = SefazEndpoints.url('SP', AmbienteSefaz.PRODUCAO, 'NFeDistribuicaoDFe');
     expect(r.autorizadora).toBe('NACIONAL');
-    expect(r.url).toMatch(/svrs\.rs\.gov\.br/);
+    expect(r.url).toBe(
+      'https://www1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx',
+    );
+  });
+
+  it('Distribuição DF-e em homologação usa ambiente nacional próprio', () => {
+    const r = SefazEndpoints.url('SP', AmbienteSefaz.HOMOLOGACAO, 'NFeDistribuicaoDFe');
+    expect(r.autorizadora).toBe('NACIONAL');
+    expect(r.url).toBe(
+      'https://hom1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx',
+    );
   });
 
   it('contingência SVC-AN para SP/RJ/ES/MG/BA/GO/PR', () => {

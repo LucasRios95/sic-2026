@@ -102,11 +102,14 @@ export class SefazSoapClient {
       const response = await this.callWithSingleRetry(httpClient, url, envelope, params.service);
       httpStatus = response.status;
       responseXml = response.data;
+      if (httpStatus >= 400) {
+        throw new Error(`HTTP ${httpStatus}`);
+      }
       ({ cStat, xMotivo } = this.extractStatus(responseXml));
     } catch (err) {
       const axiosErr = err as { response?: { status: number; data: string }; message: string };
-      httpStatus = axiosErr.response?.status ?? 0;
-      responseXml = axiosErr.response?.data ?? '';
+      httpStatus = axiosErr.response?.status ?? httpStatus;
+      responseXml = axiosErr.response?.data ?? responseXml;
       errorMessage = axiosErr.message;
       logger.warn({ url, err: errorMessage }, 'Falha de comunicação com SEFAZ');
       throw new IntegrationError(
@@ -153,6 +156,20 @@ export class SefazSoapClient {
    */
   private wrapInSoapEnvelope(bodyXml: string, service: SefazService): string {
     const action = `http://www.portalfiscal.inf.br/nfe/wsdl/${service}`;
+    if (service === 'NFeDistribuicaoDFe') {
+      return [
+        '<?xml version="1.0" encoding="utf-8"?>',
+        '<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ',
+        'xmlns:xsd="http://www.w3.org/2001/XMLSchema" ',
+        'xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">',
+        '<soap12:Body>',
+        `<nfeDistDFeInteresse xmlns="${action}">`,
+        `<nfeDadosMsg>${bodyXml}</nfeDadosMsg>`,
+        '</nfeDistDFeInteresse>',
+        '</soap12:Body>',
+        '</soap12:Envelope>',
+      ].join('');
+    }
     return [
       '<?xml version="1.0" encoding="utf-8"?>',
       '<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">',
