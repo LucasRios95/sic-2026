@@ -5,6 +5,8 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3333),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
+  APP_BUILD_SHA: z.string().optional().default('unknown'),
+  APP_BUILD_SOURCE: z.string().optional().default('unknown'),
 
   // URL única de conexão (ex.: Railway: DATABASE_URL=${{Postgres.DATABASE_PRIVATE_URL}}).
   // Quando definida, tem precedência sobre as variáveis discretas DB_* abaixo.
