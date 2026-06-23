@@ -36,6 +36,7 @@ const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@',
   removeNSPrefix: true,
+  parseTagValue: false,
 });
 
 /**
@@ -59,24 +60,45 @@ export function decodeDocZip(input: {
  */
 export function parseResumoNFe(xml: string): ResumoNFeData {
   const parsed = xmlParser.parse(xml) as Record<string, unknown>;
-  const resNFe = (parsed.resNFe ?? parsed.resnfe ?? parsed) as Record<string, unknown>;
+  const resNFe = asRecord(findRecursive(parsed, 'resNFe')) ?? parsed;
 
-  const chaveAcesso = String(resNFe.chNFe ?? '');
+  const chaveAcesso = String(resNFe.chNFe ?? findRecursive(parsed, 'chNFe') ?? '');
   if (!/^\d{44}$/.test(chaveAcesso)) {
     throw new Error('Resumo NF-e sem chave de acesso válida');
   }
 
-  const cnpjRaw = String(resNFe.CNPJ ?? resNFe.cnpj ?? '');
+  const cnpjRaw = String(
+    resNFe.CNPJ ?? resNFe.cnpj ?? findRecursive(parsed, 'CNPJ') ?? findRecursive(parsed, 'cnpj') ?? '',
+  );
   return {
     chaveAcesso,
     emitenteCnpj: cnpjRaw.replace(/\D/g, ''),
-    emitenteNome: String(resNFe.xNome ?? ''),
-    dhEmissao: new Date(String(resNFe.dhEmi ?? new Date().toISOString())),
-    valorTotal: String(resNFe.vNF ?? '0.00'),
+    emitenteNome: String(resNFe.xNome ?? findRecursive(parsed, 'xNome') ?? ''),
+    dhEmissao: new Date(
+      String(resNFe.dhEmi ?? findRecursive(parsed, 'dhEmi') ?? new Date().toISOString()),
+    ),
+    valorTotal: String(resNFe.vNF ?? findRecursive(parsed, 'vNF') ?? '0.00'),
     ufEmitente: ufFromChave(chaveAcesso),
     numero: String(chaveAcesso.slice(25, 34)).replace(/^0+/, ''),
     serie: String(chaveAcesso.slice(22, 25)).replace(/^0+/, '') || '0',
   };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
+function findRecursive(obj: unknown, key: string): unknown {
+  if (!obj || typeof obj !== 'object') return null;
+  const record = obj as Record<string, unknown>;
+  if (key in record) return record[key];
+  const matchedKey = Object.keys(record).find((candidate) => candidate.endsWith(`:${key}`));
+  if (matchedKey) return record[matchedKey];
+  for (const value of Object.values(record)) {
+    const found = findRecursive(value, key);
+    if (found !== null) return found;
+  }
+  return null;
 }
 
 /**

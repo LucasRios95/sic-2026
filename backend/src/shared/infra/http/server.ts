@@ -6,6 +6,7 @@ import { env } from '@config/env';
 import { logger } from '@shared/logger';
 import { initializeTelemetry } from '@shared/telemetry/opentelemetry';
 import { appDataSource } from '@shared/infra/typeorm/data-source';
+import { RecepcaoAutoSyncScheduler } from '@shared/infra/scheduler/RecepcaoAutoSyncScheduler';
 
 import { IQueueProvider } from '@shared/container/providers/QueueProvider/IQueueProvider';
 
@@ -35,11 +36,14 @@ async function bootstrap(): Promise<void> {
       `Servidor sic-2026-backend ouvindo em http://localhost:${env.PORT}`,
     );
   });
+  const recepcaoScheduler = new RecepcaoAutoSyncScheduler();
+  recepcaoScheduler.start();
 
   // Graceful shutdown: encerra HTTP, filas e telemetria antes de matar o processo.
   // Importante em produção para não perder jobs em vôo nem traces.
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'Encerrando graciosamente');
+    recepcaoScheduler.stop();
     server.close();
     await queue.shutdown().catch((err) => logger.warn({ err }, 'Erro ao fechar QueueProvider'));
     await appDataSource.destroy().catch((err) => logger.warn({ err }, 'Erro ao fechar DataSource'));

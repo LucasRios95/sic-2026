@@ -55,7 +55,7 @@ describe('parseResumoNFe', () => {
     const chave = '35260611222333000181550120000123456000000017';
     const data = parseResumoNFe(baseXml({ chNFe: chave }));
     expect(data.serie).toBe('12');
-    expect(data.numero).toBe('123456');
+    expect(data.numero).toBe('12345');
   });
 
   it('rejeita resumo sem chNFe válida', () => {

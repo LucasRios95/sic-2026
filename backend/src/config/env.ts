@@ -65,6 +65,11 @@ const envSchema = z.object({
   // onde o nginx serve o front). Setado pelo Dockerfile da raiz (ex.: /app/public).
   SERVE_FRONTEND_DIR: z.string().optional().default(''),
 
+  // --- Recepção automática DF-e no processo HTTP (serviço único/Railway) ---
+  RECEPCAO_AUTO_SYNC: z.enum(['on', 'off']).default('off'),
+  RECEPCAO_AUTO_SYNC_INTERVAL_MINUTES: z.coerce.number().int().min(30).default(60),
+  RECEPCAO_AUTO_SYNC_MAX_ITERATIONS: z.coerce.number().int().positive().max(50).default(10),
+
   // --- Validação XSD da NF-e (antes de assinar/transmitir) ---
   // block: XML inválido vira rejeição local, sem ir à SEFAZ (default).
   // warn:  loga os erros mas transmite mesmo assim (observação).

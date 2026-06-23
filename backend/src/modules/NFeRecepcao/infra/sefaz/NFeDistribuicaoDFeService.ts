@@ -3,6 +3,7 @@ import { inject, injectable } from 'tsyringe';
 
 import { AmbienteSefaz } from '@modules/Companies/infra/typeorm/entities/Company';
 import { SefazSoapClient } from '@modules/NFe/infra/sefaz/SefazSoapClient';
+import { logger } from '@shared/logger';
 
 import { decodeDocZip, DocZipRaw } from './sefazPayload';
 
@@ -20,6 +21,7 @@ const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@',
   removeNSPrefix: true,
+  parseTagValue: false,
 });
 
 /**
@@ -97,25 +99,27 @@ export class NFeDistribuicaoDFeService {
       return { cStat: null, xMotivo: null, ultNSU: null, maxNSU: null, documentos: [] };
     }
     const parsed = xmlParser.parse(responseXml) as Record<string, unknown>;
-    const ret = findRecursive(parsed, 'retDistDFeInt') as Record<string, unknown> | null;
-    const root = ret ?? findRecursive(parsed, 'retDistribuicaoDFe') ?? parsed;
+    const ret = asRecord(findRecursive(parsed, 'retDistDFeInt'));
+    const root = ret ?? asRecord(findRecursive(parsed, 'retDistribuicaoDFe')) ?? parsed;
 
-    const cStat = root && 'cStat' in root ? String(root.cStat) : null;
-    const xMotivo = root && 'xMotivo' in root ? String(root.xMotivo) : null;
-    const ultNSU = root && 'ultNSU' in root ? String(root.ultNSU) : null;
-    const maxNSU = root && 'maxNSU' in root ? String(root.maxNSU) : null;
+    const cStat = stringField(root, 'cStat');
+    const xMotivo = stringField(root, 'xMotivo');
+    const ultNSU = stringField(root, 'ultNSU');
+    const maxNSU = stringField(root, 'maxNSU');
 
-    const loteRaw = root ? findRecursive(root, 'loteDistDFeInt') : null;
+    const loteRaw = findRecursive(root, 'loteDistDFeInt');
     if (!loteRaw) {
       return { cStat, xMotivo, ultNSU, maxNSU, documentos: [] };
     }
 
-    const docZipRaw = (loteRaw as Record<string, unknown>).docZip;
+    const lote = asRecord(loteRaw);
+    const docZipRaw = lote?.docZip;
     const docZipArray = Array.isArray(docZipRaw) ? docZipRaw : docZipRaw ? [docZipRaw] : [];
 
     const documentos: DocZipRaw[] = [];
     for (const item of docZipArray) {
-      const obj = item as Record<string, unknown>;
+      const obj = asRecord(item);
+      if (!obj) continue;
       const content = String(obj['#text'] ?? '');
       const nsu = String(obj['@NSU'] ?? '');
       const schema = String(obj['@schema'] ?? '').replace(/_v\d+\.\d+/, '').split('_')[0];
@@ -124,12 +128,20 @@ export class NFeDistribuicaoDFeService {
         documentos.push(decodeDocZip({ nsu, schema, base64Content: content }));
       } catch (err) {
         // Documento corrompido: pula. O cursor não pode parar por causa disso.
-        void err;
+        logger.warn({ err, nsu, schema }, 'Falha ao decodificar docZip da Distribuição DF-e');
       }
     }
 
     return { cStat, xMotivo, ultNSU, maxNSU, documentos };
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
+function stringField(obj: Record<string, unknown>, key: string): string | null {
+  return key in obj && obj[key] !== undefined && obj[key] !== null ? String(obj[key]) : null;
 }
 
 function findRecursive(obj: unknown, key: string): unknown {

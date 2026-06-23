@@ -16,9 +16,9 @@ interface LogoProps {
  *  - `full`    → símbolo + texto completo + tagline (tela de login, splash).
  */
 export function Logo({ className, variant = 'compact', onDark = false }: LogoProps) {
-  const sicColor = onDark ? 'text-slateDark-fg/70' : 'text-slate-300';
+  const sicColor = onDark ? 'text-sidebar-foreground/80' : 'text-slate-300';
   const nfeColor = 'text-primary';
-  const taglineColor = onDark ? 'text-slateDark-muted' : 'text-muted-foreground';
+  const taglineColor = onDark ? 'text-sidebar-muted' : 'text-muted-foreground';
 
   return (
     <div className={cn('inline-flex items-center gap-3', className)}>

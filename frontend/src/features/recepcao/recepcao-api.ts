@@ -146,6 +146,7 @@ export async function getReceivedDocument(
 export interface SyncRecebidosPayload {
   certificateVaultRef: string;
   maxIterations?: number;
+  resetCursor?: boolean;
 }
 
 export interface SyncRecebidosResponse {
@@ -153,12 +154,37 @@ export interface SyncRecebidosResponse {
   capturedDocs: number;
   finalCursor: string;
   lastCStat: string | null;
+  xMotivo: string | null;
 }
 
 export async function syncRecebidos(
   payload: SyncRecebidosPayload,
 ): Promise<SyncRecebidosResponse> {
   return api<SyncRecebidosResponse>('/fiscal/recebidos/sync', {
+    method: 'POST',
+    body: payload,
+    companyId: companyOrThrow(),
+  });
+}
+
+export interface ImportXmlRecebidoPayload {
+  arquivos: Array<{
+    nome: string;
+    xmlBase64: string;
+  }>;
+}
+
+export interface ImportXmlRecebidoResponse {
+  importados: number;
+  duplicados: number;
+  falhas: Array<{ nome: string; erro: string }>;
+  avisos: Array<{ nome: string; chaveAcesso: string; aviso: string }>;
+}
+
+export async function importarXmlRecebido(
+  payload: ImportXmlRecebidoPayload,
+): Promise<ImportXmlRecebidoResponse> {
+  return api<ImportXmlRecebidoResponse>('/fiscal/recebidos/import', {
     method: 'POST',
     body: payload,
     companyId: companyOrThrow(),

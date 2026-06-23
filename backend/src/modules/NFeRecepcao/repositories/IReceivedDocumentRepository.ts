@@ -1,5 +1,5 @@
 import { ReceivedDocument } from '../infra/typeorm/entities/ReceivedDocument';
-import { ReceivedDocumentStatus, TipoDFe } from '../domain/nfe-recepcao-enums';
+import { OrigemCaptura, ReceivedDocumentStatus, TipoDFe } from '../domain/nfe-recepcao-enums';
 
 export interface UpsertReceivedDocumentData {
   companyId: string;
@@ -14,6 +14,8 @@ export interface UpsertReceivedDocumentData {
   valorTotal: string;
   nsu?: string | null;
   resumoXml?: string | null;
+  xmlCompleto?: string | null;
+  origemCaptura?: OrigemCaptura;
 }
 
 export interface ListReceivedDocumentsFilter {

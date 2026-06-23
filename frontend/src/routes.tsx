@@ -29,6 +29,7 @@ import { NFeNewPage } from '@/pages/NFeNewPage';
 import { ProductFormPage } from '@/pages/ProductFormPage';
 import { ProductsPage } from '@/pages/ProductsPage';
 import { ReceivedDocumentDetailsPage } from '@/pages/ReceivedDocumentDetailsPage';
+import { ReportsPage } from '@/pages/ReportsPage';
 import { SelectCompanyPage } from '@/pages/SelectCompanyPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TaxBenefitsPage } from '@/pages/TaxBenefitsPage';
@@ -287,6 +288,12 @@ const receivedDocumentDetailsRoute = createRoute({
   component: ReceivedDocumentDetailsPage,
 });
 
+const reportsRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/reports',
+  component: ReportsPage,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
@@ -313,6 +320,7 @@ const routeTree = rootRoute.addChildren([
     nfeDetailsRoute,
     inboxRecebidosRoute,
     receivedDocumentDetailsRoute,
+    reportsRoute,
     taxParamsRoute,
     taxParamNewRoute,
     taxParamEditRoute,

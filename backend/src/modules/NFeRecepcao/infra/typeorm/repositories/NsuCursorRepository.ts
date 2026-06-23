@@ -33,4 +33,15 @@ export class NsuCursorRepository implements INsuCursorRepository {
       },
     );
   }
+
+  async reset(id: string, lastCStat: string | null = null): Promise<void> {
+    await this.repo.update(
+      { id },
+      {
+        cursorValue: '0',
+        lastCStat,
+        lastFetchedAt: new Date(),
+      },
+    );
+  }
 }

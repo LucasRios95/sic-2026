@@ -1,4 +1,5 @@
 import { Between, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
+import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 
 import { appDataSource } from '@shared/infra/typeorm/data-source';
 
@@ -26,8 +27,18 @@ export class ReceivedDocumentRepository implements IReceivedDocumentRepository {
         await this.repo.update(
           { id: existing.id },
           {
+            tipo: data.tipo ?? existing.tipo,
+            numero: data.numero ?? existing.numero,
+            serie: data.serie ?? existing.serie,
+            emitenteCnpj: data.emitenteCnpj ?? existing.emitenteCnpj,
+            emitenteNome: data.emitenteNome ?? existing.emitenteNome,
+            emitenteUf: data.emitenteUf ?? existing.emitenteUf,
+            dhEmissao: data.dhEmissao ?? existing.dhEmissao,
+            valorTotal: data.valorTotal ?? existing.valorTotal,
             nsu: data.nsu ?? existing.nsu,
             resumoXml: data.resumoXml ?? existing.resumoXml,
+            xmlCompleto: data.xmlCompleto ?? existing.xmlCompleto,
+            origemCaptura: data.origemCaptura ?? existing.origemCaptura,
           },
         );
         return (await this.repo.findOne({ where: { id: existing.id } }))!;
@@ -71,7 +82,7 @@ export class ReceivedDocumentRepository implements IReceivedDocumentRepository {
   }
 
   async update(id: string, patch: Partial<ReceivedDocument>): Promise<ReceivedDocument> {
-    await this.repo.update({ id }, patch);
+    await this.repo.update({ id }, patch as QueryDeepPartialEntity<ReceivedDocument>);
     const found = await this.repo.findOne({ where: { id } });
     if (!found) throw new Error(`ReceivedDocument ${id} desapareceu`);
     return found;

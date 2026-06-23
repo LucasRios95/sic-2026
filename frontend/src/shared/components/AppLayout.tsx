@@ -1,6 +1,7 @@
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import {
   ArrowDownLeft,
+  BarChart3,
   Building2,
   Calculator,
   ChevronLeft,
@@ -50,6 +51,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/fiscal/nfe/new', label: 'Emitir NF-e', icon: Plus, requiredPermission: 'nfe.emit' },
       { to: '/fiscal/nfe/inutilizar', label: 'Inutilizar faixa', icon: Hash, requiredPermission: 'nfe.cancel' },
       { to: '/fiscal/recebidos', label: 'Notas recebidas', icon: ArrowDownLeft, requiredPermission: 'nfe.read' },
+      { to: '/reports', label: 'Relatórios', icon: BarChart3, requiredPermission: 'nfe.read' },
     ],
   },
   {

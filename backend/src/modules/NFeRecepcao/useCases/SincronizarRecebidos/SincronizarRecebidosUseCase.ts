@@ -17,6 +17,8 @@ interface IRequest {
   certificateVaultRef: string;
   /** Máximo de iterações por execução. Default 10 — cada uma traz até 50 docs. */
   maxIterations?: number;
+  /** Reinicia o NSU para 0 antes da consulta, útil quando um cursor foi avançado indevidamente. */
+  resetCursor?: boolean;
 }
 
 interface IResponse {
@@ -24,6 +26,7 @@ interface IResponse {
   capturedDocs: number;
   finalCursor: string;
   lastCStat: string | null;
+  xMotivo: string | null;
 }
 
 const ORIGEM_NSU = 'sefaz_nfe_cte';
@@ -32,7 +35,7 @@ const ORIGEM_NSU = 'sefaz_nfe_cte';
  * Sincroniza documentos recebidos contra o CNPJ da empresa via Distribuição DF-e da SEFAZ.
  * PRD ENT-02. Padrão:
  *  - Carrega o cursor `sefaz_nfe_cte` da empresa.
- *  - Itera até esgotar a fila SEFAZ (cStat 138 = sem novidades) ou bater `maxIterations`.
+ *  - Itera até esgotar a fila SEFAZ (cStat 137 = nenhum documento) ou bater `maxIterations`.
  *  - Para cada `docZip` retornado: descompacta, identifica schema (resNFe/procNFe), grava
  *    em `received_documents` com upsert por chave.
  *  - Avança o cursor após cada lote (mesmo que processamento individual falhe — para não
@@ -74,10 +77,15 @@ export class SincronizarRecebidosUseCase {
     }
 
     const cursor = await this.cursorRepository.findOrCreate(company.id, ORIGEM_NSU);
+    if (request.resetCursor) {
+      await this.cursorRepository.reset(cursor.id, null);
+      cursor.cursorValue = '0';
+    }
     let currentNSU = cursor.cursorValue;
     let iterations = 0;
     let capturedDocs = 0;
     let lastCStat: string | null = null;
+    let xMotivo: string | null = null;
     const maxIterations = request.maxIterations ?? 10;
 
     while (iterations < maxIterations) {
@@ -91,9 +99,10 @@ export class SincronizarRecebidosUseCase {
       });
       iterations += 1;
       lastCStat = result.cStat;
+      xMotivo = result.xMotivo;
 
-      // cStat 138 = "Não existe documento(s) para o interessado pesquisado" — fim do lote.
-      if (result.cStat === '138' || result.documentos.length === 0) {
+      // Lote vazio encerra a execução. O ponto crítico: 138 com documentos deve processar.
+      if (result.documentos.length === 0) {
         // Ainda atualiza last_fetched_at para registrar a checagem.
         await this.cursorRepository.advance(cursor.id, currentNSU, result.cStat);
         break;
@@ -129,7 +138,14 @@ export class SincronizarRecebidosUseCase {
       action: 'recepcao.sync',
       entityType: 'company',
       entityId: company.id,
-      payload: { iterations, capturedDocs, finalCursor: currentNSU, lastCStat },
+      payload: {
+        iterations,
+        capturedDocs,
+        finalCursor: currentNSU,
+        lastCStat,
+        xMotivo,
+        resetCursor: request.resetCursor === true,
+      },
     });
 
     if (capturedDocs > 0) {
@@ -142,7 +158,7 @@ export class SincronizarRecebidosUseCase {
       });
     }
 
-    return { iterations, capturedDocs, finalCursor: currentNSU, lastCStat };
+    return { iterations, capturedDocs, finalCursor: currentNSU, lastCStat, xMotivo };
   }
 
   /**

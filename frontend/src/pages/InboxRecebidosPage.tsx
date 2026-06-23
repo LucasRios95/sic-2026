@@ -9,13 +9,15 @@ import {
   Loader2,
   RefreshCw,
   Search,
+  Upload,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 
-import { listCertificates } from '@/features/certificates/certificates-api';
+import { fileToBase64, listCertificates } from '@/features/certificates/certificates-api';
 import { ManifestDialog } from '@/features/recepcao/ManifestDialog';
 import {
+  importarXmlRecebido,
   listReceivedDocuments,
   syncRecebidos,
   type ReceivedDocument,
@@ -62,6 +64,7 @@ export function InboxRecebidosPage(): React.ReactElement {
   const [manifestOpen, setManifestOpen] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<ReceivedDocument | null>(null);
   const [syncOpen, setSyncOpen] = useState(false);
+  const xmlInputRef = useRef<HTMLInputElement | null>(null);
 
   const query = useQuery({
     queryKey: ['received-documents', { statusFilter }],
@@ -96,6 +99,39 @@ export function InboxRecebidosPage(): React.ReactElement {
     navigate({ to: '/fiscal/recebidos/$id', params: { id: doc.id } });
   }
 
+  const importMutation = useMutation({
+    mutationFn: async (files: FileList) => {
+      const xmlFiles = Array.from(files).filter((file) =>
+        file.name.toLowerCase().endsWith('.xml'),
+      );
+      if (xmlFiles.length === 0) throw new Error('Selecione ao menos um arquivo .xml.');
+      const arquivos = await Promise.all(
+        xmlFiles.map(async (file) => ({
+          nome: file.name,
+          xmlBase64: await fileToBase64(file),
+        })),
+      );
+      return importarXmlRecebido({ arquivos });
+    },
+    onSuccess: (result) => {
+      toast.success(
+        `Importação concluída: ${result.importados} novo${result.importados !== 1 ? 's' : ''}, ${result.duplicados} duplicado${result.duplicados !== 1 ? 's' : ''}, ${result.falhas.length} falha${result.falhas.length !== 1 ? 's' : ''}.`,
+      );
+      if (result.avisos.length > 0) {
+        toast.warning(`${result.avisos.length} XML com aviso de CNPJ destinatário.`);
+      }
+      if (result.falhas.length > 0) {
+        toast.error(result.falhas.slice(0, 3).map((f) => `${f.nome}: ${f.erro}`).join('\n'));
+      }
+      void queryClient.invalidateQueries({ queryKey: ['received-documents'] });
+      if (xmlInputRef.current) xmlInputRef.current.value = '';
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Falha ao importar XML.');
+      if (xmlInputRef.current) xmlInputRef.current.value = '';
+    },
+  });
+
   // Stats no header
   const stats = {
     pendentes: items.filter((d) => d.status === 'PENDENTE').length,
@@ -117,6 +153,29 @@ export function InboxRecebidosPage(): React.ReactElement {
         </div>
 
         <div className="flex items-center gap-2">
+          <input
+            ref={xmlInputRef}
+            type="file"
+            accept=".xml,text/xml,application/xml"
+            multiple
+            className="hidden"
+            onChange={(event) => {
+              const files = event.target.files;
+              if (files && files.length > 0) importMutation.mutate(files);
+            }}
+          />
+          <Button
+            variant="outline"
+            onClick={() => xmlInputRef.current?.click()}
+            disabled={importMutation.isPending}
+          >
+            {importMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Upload className="h-4 w-4" />
+            )}
+            Importar XML
+          </Button>
           <Button
             variant="outline"
             onClick={() => void query.refetch()}
@@ -342,6 +401,7 @@ function SyncDialogContent({
   onSynced: () => void;
 }): React.ReactElement {
   const [certificateVaultRef, setCertificateVaultRef] = useState('');
+  const [resetCursor, setResetCursor] = useState(false);
   const certificatesQuery = useQuery({
     queryKey: ['certificates'],
     queryFn: listCertificates,
@@ -349,10 +409,13 @@ function SyncDialogContent({
   const ativos = certificatesQuery.data?.filter((c) => c.active) ?? [];
 
   const mutation = useMutation({
-    mutationFn: () => syncRecebidos({ certificateVaultRef, maxIterations: 10 }),
+    mutationFn: () => syncRecebidos({ certificateVaultRef, maxIterations: 10, resetCursor }),
     onSuccess: (result) => {
+      const diagnostico = result.lastCStat
+        ? ` cStat ${result.lastCStat}${result.xMotivo ? ` (${result.xMotivo})` : ''}.`
+        : '';
       toast.success(
-        `${result.capturedDocs} documento${result.capturedDocs !== 1 ? 's' : ''} capturado${result.capturedDocs !== 1 ? 's' : ''} em ${result.iterations} iteração${result.iterations !== 1 ? 'ões' : ''}.`,
+        `${result.capturedDocs} documento${result.capturedDocs !== 1 ? 's' : ''} capturado${result.capturedDocs !== 1 ? 's' : ''} em ${result.iterations} iteração${result.iterations !== 1 ? 'ões' : ''}.${diagnostico}`,
       );
       onSynced();
     },
@@ -403,6 +466,22 @@ function SyncDialogContent({
             </p>
           )}
         </div>
+
+        <label className="flex items-start gap-2 rounded-md border border-border p-3 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 rounded border-border"
+            checked={resetCursor}
+            onChange={(e) => setResetCursor(e.target.checked)}
+          />
+          <span>
+            <span className="font-medium text-foreground">Reconsultar do zero</span>
+            <span className="block text-xs text-muted-foreground">
+              Reinicia o NSU para 0 antes de sincronizar. Use quando o cursor pode ter
+              avançado indevidamente.
+            </span>
+          </span>
+        </label>
 
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>

@@ -10,6 +10,7 @@ export class SincronizarRecebidosController {
       companyId: request.companyId!,
       certificateVaultRef: request.body.certificateVaultRef,
       maxIterations: request.body.maxIterations,
+      resetCursor: request.body.resetCursor,
     });
     return response.json({ data: result });
   }

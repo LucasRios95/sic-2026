@@ -10,4 +10,7 @@ export interface INsuCursorRepository {
     newValue: string,
     lastCStat: string | null,
   ): Promise<void>;
+
+  /** Reinicia o cursor para permitir uma reconsulta completa da distribuição DF-e. */
+  reset(id: string, lastCStat?: string | null): Promise<void>;
 }

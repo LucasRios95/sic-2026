@@ -5,6 +5,19 @@ import { ReceivedDocumentStatus, TipoManifestacao } from '../../../domain/nfe-re
 export const sincronizarRecebidosSchema = z.object({
   certificateVaultRef: z.string().min(3).max(200),
   maxIterations: z.number().int().positive().max(50).optional(),
+  resetCursor: z.boolean().optional(),
+});
+
+export const importarXmlRecebidoSchema = z.object({
+  arquivos: z
+    .array(
+      z.object({
+        nome: z.string().min(1).max(255),
+        xmlBase64: z.string().min(1),
+      }),
+    )
+    .min(1)
+    .max(100),
 });
 
 export const manifestarSchema = z
