@@ -536,7 +536,10 @@ export class NFeXmlBuilder {
     for (const p of doc.pagamentos) {
       const det = pag.ele('detPag');
       det.ele('tPag').txt(p.meio).up();
-      det.ele('vPag').txt(p.valor).up();
+      // tPag=90 (Sem pagamento) — ex.: devolução/remessa. A SEFAZ exige vPag=0.00 nesse
+      // caso; informar o valor real dispara cStat 904 ("valor de pagamento informado
+      // indevidamente"). Demais meios usam o valor real (a soma deve fechar com o vNF).
+      det.ele('vPag').txt(p.meio === '90' ? '0.00' : p.valor).up();
       if (p.bandeira) {
         const card = det.ele('card');
         card.ele('tpIntegra').txt('2').up();
