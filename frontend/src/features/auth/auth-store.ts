@@ -25,6 +25,12 @@ interface AuthState {
   }) => void;
   setUser: (user: AuthUser) => void;
   setCompany: (companyId: string) => void;
+  /** Atualiza só os tokens após um refresh silencioso, preservando user e empresa. */
+  updateTokens: (params: {
+    accessToken: string;
+    refreshToken: string;
+    refreshTokenExpiresAt: string;
+  }) => void;
   clear: () => void;
 }
 
@@ -59,6 +65,8 @@ export const useAuthStore = create<AuthState>()(
       },
       setUser: (user) => set({ user }),
       setCompany: (companyId) => set({ selectedCompanyId: companyId }),
+      updateTokens: ({ accessToken, refreshToken, refreshTokenExpiresAt }) =>
+        set({ accessToken, refreshToken, refreshTokenExpiresAt }),
       clear: () =>
         set({
           accessToken: null,

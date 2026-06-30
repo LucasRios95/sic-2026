@@ -24,9 +24,13 @@ RUN npx vite build
 
 # --- Stage 2: backend (Node) + estáticos do frontend ---
 FROM node:22-alpine
+ARG RAILWAY_GIT_COMMIT_SHA=unknown
+ARG RAILWAY_SERVICE_NAME=unknown
 RUN apk add --no-cache tini
 WORKDIR /app
 ENV NODE_ENV=production
+ENV APP_BUILD_SHA=${RAILWAY_GIT_COMMIT_SHA}
+ENV APP_BUILD_SOURCE=${RAILWAY_SERVICE_NAME}
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 ENV NPM_CONFIG_FUND=false
 

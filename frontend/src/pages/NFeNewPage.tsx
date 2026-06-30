@@ -15,6 +15,13 @@ import {
   type ModFrete,
   type TipoOperacao,
 } from '@/features/nfe/nfe-api';
+import {
+  clearNFeDraft,
+  draftHasContent,
+  loadNFeDraft,
+  saveNFeDraft,
+  type NFeDraft,
+} from '@/features/nfe/nfe-draft';
 import { getProduct, listProducts } from '@/features/products/products-api';
 import { ApiError } from '@/lib/api';
 import { Badge } from '@/shared/components/ui/Badge';
@@ -321,6 +328,154 @@ export function NFeNewPage(): React.ReactElement {
     setReissuePrefilled(true);
   }, [reissueQuery.data, reissuePrefilled]);
 
+  // --- Autosave de rascunho (localStorage, escopado por empresa) -------------
+  // O faturista digita a nota inteira em useState; sem persistência, um logout ou
+  // refresh da aba perdia tudo. Aqui montamos um snapshot serializável de todos os
+  // campos e gravamos com debounce. Ao reabrir a tela, oferecemos recuperar.
+  const draftSnapshot = useMemo<NFeDraft>(
+    () => ({
+      customerId,
+      serie,
+      numero,
+      naturezaOperacao,
+      tipoOperacao,
+      finalidade,
+      chavesReferenciadas,
+      infCpl,
+      items,
+      pagamentoMeio,
+      certificateVaultRef,
+      transmitirImediatamente,
+      modFrete,
+      transpCnpjCpf,
+      transpNome,
+      transpIE,
+      transpEndereco,
+      transpMunicipio,
+      transpUf,
+      veicPlaca,
+      veicUf,
+      volQtd,
+      volEspecie,
+      volPesoLiq,
+      volPesoBruto,
+      savedAt: Date.now(),
+    }),
+    [
+      customerId,
+      serie,
+      numero,
+      naturezaOperacao,
+      tipoOperacao,
+      finalidade,
+      chavesReferenciadas,
+      infCpl,
+      items,
+      pagamentoMeio,
+      certificateVaultRef,
+      transmitirImediatamente,
+      modFrete,
+      transpCnpjCpf,
+      transpNome,
+      transpIE,
+      transpEndereco,
+      transpMunicipio,
+      transpUf,
+      veicPlaca,
+      veicUf,
+      volQtd,
+      volEspecie,
+      volPesoLiq,
+      volPesoBruto,
+    ],
+  );
+
+  // Rascunho recuperável: lido uma única vez ao montar. Guardado em ref para que o
+  // autosave (que pode sobrescrever o localStorage) não nos faça perder o original
+  // antes de o usuário decidir recuperar/descartar.
+  const recoveredDraftRef = useRef<NFeDraft | null>(null);
+  const recoverCheckedRef = useRef(false);
+  const [showRecoverBanner, setShowRecoverBanner] = useState(false);
+  const [savedFeedback, setSavedFeedback] = useState(false);
+
+  useEffect(() => {
+    if (reissueFrom) return; // reemissão tem seu próprio prefill; não mexe no rascunho
+    if (recoverCheckedRef.current || !selectedCompanyId) return;
+    recoverCheckedRef.current = true;
+    const existing = loadNFeDraft(selectedCompanyId);
+    if (existing && draftHasContent(existing)) {
+      recoveredDraftRef.current = existing;
+      setShowRecoverBanner(true);
+    }
+  }, [selectedCompanyId, reissueFrom]);
+
+  // Grava com debounce. Não persiste em reemissão nem quando o form está "intacto".
+  const debouncedDraft = useDebounce(draftSnapshot, 1000);
+  useEffect(() => {
+    if (reissueFrom || !selectedCompanyId) return;
+    if (!draftHasContent(debouncedDraft)) return;
+    saveNFeDraft(selectedCompanyId, debouncedDraft);
+  }, [debouncedDraft, reissueFrom, selectedCompanyId]);
+
+  // Aplica um rascunho nos campos do form (mesmo padrão do prefill de reemissão) e
+  // reidrata os comboboxes de cliente/produto via cache.
+  const applyDraft = useCallback(
+    (d: NFeDraft): void => {
+      setCustomerId(d.customerId);
+      setSerie(d.serie);
+      setNumero(d.numero);
+      setNaturezaOperacao(d.naturezaOperacao);
+      setTipoOperacao(d.tipoOperacao);
+      setFinalidade(d.finalidade);
+      setChavesReferenciadas(d.chavesReferenciadas);
+      setInfCpl(d.infCpl);
+      // Regenera ids das linhas para não colidir com novas linhas (makeRow) da sessão.
+      setItems(
+        d.items.length > 0
+          ? d.items.map((it) => ({ ...it, id: `row-${nextRowId++}` }))
+          : [makeRow()],
+      );
+      setPagamentoMeio(d.pagamentoMeio);
+      setCertificateVaultRef(d.certificateVaultRef);
+      setTransmitirImediatamente(d.transmitirImediatamente);
+      setModFrete(d.modFrete);
+      setTranspCnpjCpf(d.transpCnpjCpf);
+      setTranspNome(d.transpNome);
+      setTranspIE(d.transpIE);
+      setTranspEndereco(d.transpEndereco);
+      setTranspMunicipio(d.transpMunicipio);
+      setTranspUf(d.transpUf);
+      setVeicPlaca(d.veicPlaca);
+      setVeicUf(d.veicUf);
+      setVolQtd(d.volQtd);
+      setVolEspecie(d.volEspecie);
+      setVolPesoLiq(d.volPesoLiq);
+      setVolPesoBruto(d.volPesoBruto);
+      if (d.customerId) void loadCustomerOption(d.customerId);
+      for (const it of d.items) {
+        if (it.productId) void loadProductOption(it.productId);
+      }
+    },
+    [loadCustomerOption, loadProductOption],
+  );
+
+  function handleRecoverDraft(): void {
+    if (recoveredDraftRef.current) applyDraft(recoveredDraftRef.current);
+    setShowRecoverBanner(false);
+  }
+
+  function handleDiscardDraft(): void {
+    clearNFeDraft(selectedCompanyId);
+    recoveredDraftRef.current = null;
+    setShowRecoverBanner(false);
+  }
+
+  function handleManualSave(): void {
+    saveNFeDraft(selectedCompanyId, { ...draftSnapshot, savedAt: Date.now() });
+    setSavedFeedback(true);
+    window.setTimeout(() => setSavedFeedback(false), 2000);
+  }
+
   // Debounce do payload do simulate para evitar tempestade de requests enquanto digita.
   const simulateInput = useMemo(() => {
     if (!activeCustomer) return null;
@@ -434,6 +589,9 @@ export function NFeNewPage(): React.ReactElement {
       });
     },
     onSuccess: ({ nfe, transmissionError }) => {
+      // Nota criada no backend (mesmo que a transmissão SEFAZ falhe): o rascunho
+      // local não é mais necessário.
+      clearNFeDraft(selectedCompanyId);
       // Mesmo em sucesso HTTP, a transmissao SEFAZ pode ter falhado e a NFe ficado
       // em PROCESSING. Mostramos o erro e nao redirecionamos pra detalhe -- o
       // usuario decide se corrige ou se vai ver o historico.
@@ -501,6 +659,25 @@ export function NFeNewPage(): React.ReactElement {
             <strong>{String(reissueQuery.data.numero).padStart(9, '0')}</strong>{' '}
             (status {reissueQuery.data.status}, motivo:{' '}
             <em>{reissueQuery.data.xMotivo ?? 'sem mensagem'}</em>).
+          </div>
+        ) : null}
+        {showRecoverBanner && recoveredDraftRef.current ? (
+          <div className="mt-3 flex flex-col gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-foreground sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              Encontramos um rascunho não emitido de{' '}
+              <strong>
+                {new Date(recoveredDraftRef.current.savedAt).toLocaleString('pt-BR')}
+              </strong>
+              . Deseja recuperá-lo?
+            </span>
+            <div className="flex shrink-0 gap-2">
+              <Button size="sm" onClick={handleRecoverDraft}>
+                Recuperar
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleDiscardDraft}>
+                Descartar
+              </Button>
+            </div>
           </div>
         ) : null}
       </header>
@@ -1021,7 +1198,17 @@ export function NFeNewPage(): React.ReactElement {
             </div>
           ) : null}
         </CardContent>
-        <CardContent className="pt-0 flex justify-end">
+        <CardContent className="pt-0 flex items-center justify-end gap-2">
+          {!reissueFrom ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleManualSave}
+              disabled={!draftHasContent(draftSnapshot)}
+            >
+              {savedFeedback ? 'Rascunho salvo ✓' : 'Salvar rascunho'}
+            </Button>
+          ) : null}
           <Button
             onClick={() => emitirMutation.mutate()}
             loading={emitirMutation.isPending}

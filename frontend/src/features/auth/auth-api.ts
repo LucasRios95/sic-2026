@@ -22,6 +22,20 @@ export async function login(payload: LoginPayload): Promise<LoginResponse> {
   });
 }
 
+export interface RefreshResponse {
+  accessToken: string;
+  refreshToken: string;
+  refreshTokenExpiresAt: string;
+}
+
+export async function refreshSession(refreshToken: string): Promise<RefreshResponse> {
+  return api<RefreshResponse>('/auth/refresh', {
+    method: 'POST',
+    body: { refreshToken },
+    skipAuth: true,
+  });
+}
+
 export async function fetchMe(): Promise<AuthUser> {
   return api<AuthUser>('/auth/me');
 }

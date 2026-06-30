@@ -7,6 +7,8 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   APP_BUILD_SHA: z.string().optional().default('unknown'),
   APP_BUILD_SOURCE: z.string().optional().default('unknown'),
+  RAILWAY_GIT_COMMIT_SHA: z.string().optional().default(''),
+  RAILWAY_SERVICE_NAME: z.string().optional().default(''),
 
   // URL única de conexão (ex.: Railway: DATABASE_URL=${{Postgres.DATABASE_PRIVATE_URL}}).
   // Quando definida, tem precedência sobre as variáveis discretas DB_* abaixo.
@@ -30,7 +32,7 @@ const envSchema = z.object({
     .transform((v) => v === 'true'),
 
   JWT_SECRET: z.string().min(16),
-  JWT_ACCESS_TOKEN_EXPIRES_IN: z.string().default('15m'),
+  JWT_ACCESS_TOKEN_EXPIRES_IN: z.string().default('1h'),
   JWT_REFRESH_TOKEN_EXPIRES_IN: z.string().default('7d'),
   BCRYPT_COST: z.coerce.number().int().min(10).max(15).default(12),
   LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),

@@ -23,6 +23,7 @@ import { useState } from 'react';
 
 import { logout } from '@/features/auth/auth-api';
 import { useAuthStore } from '@/features/auth/auth-store';
+import { useSessionRefresh } from '@/features/auth/useSessionRefresh';
 import { CompanySwitcher } from '@/shared/components/CompanySwitcher';
 import { Logo } from '@/shared/components/Logo';
 import { cn } from '@/lib/utils';
@@ -113,6 +114,10 @@ export function AppLayout(): React.ReactElement {
   const navigate = useNavigate();
   const { user, refreshToken, clear } = useAuthStore();
   const location = useRouterState({ select: (s) => s.location.pathname });
+
+  // Renova o access token proativamente (~60s antes de expirar) enquanto a
+  // área autenticada está montada, evitando o logout abrupto no 401.
+  useSessionRefresh();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
