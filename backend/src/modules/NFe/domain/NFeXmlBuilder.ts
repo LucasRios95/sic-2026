@@ -502,7 +502,10 @@ export class NFeXmlBuilder {
       const tr = transp.ele('transporta');
       if (t.transportadora.cnpjCpf) {
         const digits = onlyDigits(t.transportadora.cnpjCpf);
-        tr.ele(digits.length === 14 ? 'CNPJ' : 'CPF').txt(digits).up();
+        // Só emite documento com comprimento válido (14=CNPJ, 11=CPF). Comprimento
+        // inválido geraria rejeição XSD (cStat 225); a validação no schema já barra antes.
+        if (digits.length === 14) tr.ele('CNPJ').txt(digits).up();
+        else if (digits.length === 11) tr.ele('CPF').txt(digits).up();
       }
       if (t.transportadora.ie) tr.ele('IE').txt(t.transportadora.ie).up();
       if (t.transportadora.nome) tr.ele('xNome').txt(t.transportadora.nome).up();

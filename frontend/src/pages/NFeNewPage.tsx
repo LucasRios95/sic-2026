@@ -170,6 +170,11 @@ export function NFeNewPage(): React.ReactElement {
 
   const exigeReferencia = FINALIDADES_COM_REF.includes(finalidade);
   const transporteHabilitado = modFrete !== 9;
+  // CNPJ/CPF da transportadora precisa ter 11 (CPF) ou 14 (CNPJ) dígitos — senão a SEFAZ
+  // rejeita por XSD (cStat 225). Valida só quando algo foi digitado.
+  const transpDocDigits = transpCnpjCpf.replace(/\D/g, '');
+  const transpDocInvalido =
+    transpDocDigits.length > 0 && ![11, 14].includes(transpDocDigits.length);
 
   // Cache local dos cadastros já vistos — alimentado pelo combobox e por
   // chamadas `getCustomer/getProduct` quando o usuário pica um item.
@@ -1146,6 +1151,11 @@ export function NFeNewPage(): React.ReactElement {
                       onChange={(e) => setTranspCnpjCpf(e.target.value)}
                       placeholder="Apenas dígitos"
                     />
+                    {transpDocInvalido ? (
+                      <p className="text-xs text-destructive">
+                        Deve ter 11 (CPF) ou 14 (CNPJ) dígitos.
+                      </p>
+                    ) : null}
                   </div>
                   <div className="space-y-1 col-span-2">
                     <Label className="text-xs">Razão social / Nome</Label>
@@ -1345,6 +1355,7 @@ export function NFeNewPage(): React.ReactElement {
             disabled={
               !customerId ||
               items.every((it) => !it.productId) ||
+              transpDocInvalido ||
               (exigeReferencia &&
                 !chavesReferenciadas.some((c) => c.replace(/\D/g, '').length === 44))
             }

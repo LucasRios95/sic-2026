@@ -44,7 +44,14 @@ export const emitirNFeSchema = z.object({
     .object({
       transportadora: z
         .object({
-          cnpjCpf: z.string().optional().nullable(),
+          cnpjCpf: z
+            .string()
+            .optional()
+            .nullable()
+            .refine(
+              (v) => v == null || v === '' || [11, 14].includes(v.replace(/\D/g, '').length),
+              'CNPJ/CPF da transportadora deve ter 11 (CPF) ou 14 (CNPJ) dígitos',
+            ),
           nome: z.string().max(200).optional().nullable(),
           ie: z.string().max(20).optional().nullable(),
           endereco: z.string().max(200).optional().nullable(),

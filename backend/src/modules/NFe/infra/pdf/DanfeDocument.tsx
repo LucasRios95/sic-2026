@@ -401,9 +401,6 @@ export function DanfeDocument({
               <Text style={styles.danfeBadge}>
                 {TIPO_OPERACAO_LABEL[nfe.tipoOperacao] ?? nfe.tipoOperacao}
               </Text>
-              <Text style={[styles.danfeBadge, { fontSize: 6 }]}>
-                {consumidorFinal ? 'CONSUMIDOR FINAL' : 'OPERAÇÃO NORMAL'}
-              </Text>
               <Text style={{ fontSize: 7, marginTop: 4 }}>
                 Nº <Text style={styles.bold}>{fmtNumeroNfe(nfe.numero)}</Text>
               </Text>
@@ -464,7 +461,19 @@ export function DanfeDocument({
         {/* ===== Quadro 2: Destinatário/Remetente ===== */}
         {destinatario && (
           <View style={[styles.box, { marginTop: 3 }]}>
-            <Text style={styles.quadroTitle}>DESTINATÁRIO / REMETENTE</Text>
+            <View
+              style={[
+                styles.quadroTitle,
+                { flexDirection: 'row', justifyContent: 'space-between' },
+              ]}
+            >
+              <Text style={{ fontSize: 6, fontWeight: 'bold', color: COLORS.labelText }}>
+                DESTINATÁRIO / REMETENTE
+              </Text>
+              <Text style={{ fontSize: 6, fontWeight: 'bold', color: COLORS.labelText }}>
+                {consumidorFinal ? 'CONSUMIDOR FINAL' : 'NÃO CONSUMIDOR FINAL'}
+              </Text>
+            </View>
             {/* Linha 1: Nome, CNPJ/CPF, Data Emissão */}
             <View style={styles.colBorderBottom}>
               <View style={styles.row}>
