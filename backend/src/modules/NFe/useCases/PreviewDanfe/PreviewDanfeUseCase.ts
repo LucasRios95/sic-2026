@@ -211,6 +211,8 @@ export class PreviewDanfeUseCase {
         barcodePng,
         qrCodePng,
         preview: true,
+        modalidadeFrete: request.modalidadeFrete,
+        consumidorFinal: customer.consumidorFinal,
       }),
     );
   }
@@ -294,6 +296,7 @@ export interface PreviewDanfeRequest {
   naturezaOperacao: string;
   tipoOperacao?: TipoOperacao;
   finalidade?: FinalidadeNFe;
+  modalidadeFrete?: number;
   itens: PreviewDanfeItemInput[];
   infCpl?: string;
 }

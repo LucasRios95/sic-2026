@@ -213,6 +213,17 @@ export interface DanfeProps {
   qrCodePng?: Buffer;
   /** Quando true, marca o documento como espelho de pré-visualização (sem valor fiscal). */
   preview?: boolean;
+  /**
+   * Modalidade do frete (modFrete: 0-4, 9). Não é persistida na entidade NFe, então é
+   * passada à parte — do payload (preview) ou extraída do XML (DANFE autorizado). Quando
+   * ausente, cai em 9 (sem ocorrência de transporte).
+   */
+  modalidadeFrete?: number;
+  /**
+   * Indicador de operação com consumidor final (indFinal): true = consumidor final,
+   * false = normal. Do cadastro do destinatário (preview) ou do XML (DANFE autorizado).
+   */
+  consumidorFinal?: boolean;
 }
 
 export function DanfeDocument({
@@ -222,6 +233,8 @@ export function DanfeDocument({
   barcodePng,
   qrCodePng,
   preview,
+  modalidadeFrete,
+  consumidorFinal,
 }: DanfeProps): React.ReactElement {
   const isHomologacao = nfe.ambiente === AmbienteSefaz.HOMOLOGACAO;
   const chave = nfe.chaveAcesso ?? '';
@@ -335,6 +348,9 @@ export function DanfeDocument({
               </Text>
               <Text style={styles.danfeBadge}>
                 {TIPO_OPERACAO_LABEL[nfe.tipoOperacao] ?? nfe.tipoOperacao}
+              </Text>
+              <Text style={[styles.danfeBadge, { fontSize: 6 }]}>
+                {consumidorFinal ? 'CONSUMIDOR FINAL' : 'OPERAÇÃO NORMAL'}
               </Text>
               <Text style={{ fontSize: 7, marginTop: 4 }}>
                 Nº <Text style={styles.bold}>{fmtNumeroNfe(nfe.numero)}</Text>
@@ -531,7 +547,7 @@ export function DanfeDocument({
             <View style={[styles.colBorderRight, styles.field, { flex: 2 }]}>
               <Text style={styles.fieldLabel}>FRETE POR CONTA</Text>
               <Text style={styles.fieldValue}>
-                {MOD_FRETE_LABEL['9']}
+                {MOD_FRETE_LABEL[String(modalidadeFrete ?? 9)] ?? MOD_FRETE_LABEL['9']}
               </Text>
             </View>
             <View style={[styles.colBorderRight, styles.field, { flex: 1 }]}>

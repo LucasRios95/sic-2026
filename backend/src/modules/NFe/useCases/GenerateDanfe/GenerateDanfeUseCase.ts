@@ -99,6 +99,13 @@ export class GenerateDanfeUseCase {
 
     // @react-pdf/renderer espera ReactElement. Como o tipo NFe aqui já carrega items,
     // usamos cast para o shape esperado pelo componente.
+    // modFrete/indFinal não são colunas da NFe — extraímos do XML (fonte da verdade),
+    // com fallback no cadastro do destinatário para o indicador de consumidor final.
+    const xmlFonte = nfe.xmlAutorizado ?? nfe.xmlAssinado;
+    const modalidadeFrete = extractModFrete(xmlFonte);
+    const indFinalXml = extractIndFinal(xmlFonte);
+    const consumidorFinal = indFinalXml ?? customer?.consumidorFinal ?? false;
+
     const pdfBuffer = await renderToBuffer(
       React.createElement(DanfeDocument, {
         nfe: nfe as NFe & { items: NFeItem[] },
@@ -106,6 +113,8 @@ export class GenerateDanfeUseCase {
         destinatario: customer,
         barcodePng,
         qrCodePng,
+        modalidadeFrete,
+        consumidorFinal,
       }),
     );
 
@@ -124,4 +133,18 @@ export class GenerateDanfeUseCase {
     const month = String(new Date(nfe.dhEmissao).getUTCMonth() + 1).padStart(2, '0');
     return `nfe/${nfe.companyId}/${year}/${month}/${nfe.chaveAcesso}.pdf`;
   }
+}
+
+/** Extrai o modFrete (0-4, 9) do XML da NF-e. Retorna undefined se não achar. */
+function extractModFrete(xml: string | null | undefined): number | undefined {
+  if (!xml) return undefined;
+  const match = xml.match(/<modFrete>\s*(\d)\s*<\/modFrete>/);
+  return match ? Number(match[1]) : undefined;
+}
+
+/** Extrai o indFinal (0=normal, 1=consumidor final) do XML. undefined se não achar. */
+function extractIndFinal(xml: string | null | undefined): boolean | undefined {
+  if (!xml) return undefined;
+  const match = xml.match(/<indFinal>\s*(\d)\s*<\/indFinal>/);
+  return match ? match[1] === '1' : undefined;
 }
