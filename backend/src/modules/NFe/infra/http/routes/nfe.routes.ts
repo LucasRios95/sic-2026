@@ -11,6 +11,7 @@ import { GetNFeController } from '@modules/NFe/useCases/GetNFe/GetNFeController'
 import { GetProximoNumeroController } from '@modules/NFe/useCases/GetProximoNumero/GetProximoNumeroController';
 import { InutilizarNumeracaoController } from '@modules/NFe/useCases/InutilizarNumeracao/InutilizarNumeracaoController';
 import { ListNFesController } from '@modules/NFe/useCases/ListNFes/ListNFesController';
+import { PreviewDanfeController } from '@modules/NFe/useCases/PreviewDanfe/PreviewDanfeController';
 import { SendNFeByEmailController } from '@modules/NFe/useCases/SendNFeByEmail/SendNFeByEmailController';
 import { StatusServicoController } from '@modules/NFe/useCases/StatusServico/StatusServicoController';
 import { requireAuth } from '@shared/infra/http/middlewares/requireAuth';
@@ -25,6 +26,7 @@ import {
   emitirNFeSchema,
   inutilizarNumeracaoSchema,
   listNFesQuerySchema,
+  previewDanfeSchema,
 } from '../validators/emitirNFeValidators';
 import { statusServicoSchema } from '../validators/nfeValidators';
 
@@ -41,6 +43,7 @@ const getController = new GetNFeController();
 const proximoNumeroController = new GetProximoNumeroController();
 const listController = new ListNFesController();
 const danfeController = new GenerateDanfeController();
+const previewDanfeController = new PreviewDanfeController();
 const downloadXmlController = new DownloadXmlController();
 const sendEmailController = new SendNFeByEmailController();
 
@@ -80,6 +83,15 @@ nfeRoutes.post(
   requirePermission('nfe.emit', 'admin.full'),
   validate({ body: emitirNFeSchema }),
   (req, res) => emitirController.handle(req, res),
+);
+
+// Pré-visualização (espelho DANFE) — renderiza o PDF a partir do rascunho em digitação,
+// sem reservar número, persistir, assinar ou transmitir. Devolve application/pdf.
+nfeRoutes.post(
+  '/preview',
+  requirePermission('nfe.emit', 'admin.full'),
+  validate({ body: previewDanfeSchema }),
+  (req, res) => previewDanfeController.handle(req, res),
 );
 nfeRoutes.post(
   '/:id/cancel',

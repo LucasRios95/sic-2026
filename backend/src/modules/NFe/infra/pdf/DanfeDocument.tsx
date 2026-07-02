@@ -68,6 +68,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
+  // Variante laranja para o espelho de pré-visualização
+  tarjaPreview: {
+    backgroundColor: '#ffcc80',
+  },
 
   // Bordas e grid
   box: { borderWidth: 1, borderColor: COLORS.border },
@@ -207,6 +211,8 @@ export interface DanfeProps {
   destinatario: Customer | null;
   barcodePng: Buffer;
   qrCodePng?: Buffer;
+  /** Quando true, marca o documento como espelho de pré-visualização (sem valor fiscal). */
+  preview?: boolean;
 }
 
 export function DanfeDocument({
@@ -215,6 +221,7 @@ export function DanfeDocument({
   destinatario,
   barcodePng,
   qrCodePng,
+  preview,
 }: DanfeProps): React.ReactElement {
   const isHomologacao = nfe.ambiente === AmbienteSefaz.HOMOLOGACAO;
   const chave = nfe.chaveAcesso ?? '';
@@ -226,6 +233,11 @@ export function DanfeDocument({
   return (
     <Document>
       <Page size="A4" style={styles.page}>
+        {preview && (
+          <View style={[styles.tarja, styles.tarjaPreview]}>
+            <Text>PRÉ-VISUALIZAÇÃO — SEM VALOR FISCAL (NÃO EMITIDA)</Text>
+          </View>
+        )}
         {isHomologacao && (
           <View style={styles.tarja}>
             <Text>SEM VALOR FISCAL — AMBIENTE DE HOMOLOGAÇÃO</Text>

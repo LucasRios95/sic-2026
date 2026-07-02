@@ -109,6 +109,17 @@ export const emitirNFeSchema = z.object({
   transmitirImediatamente: z.boolean().optional(),
 });
 
+/**
+ * Payload da pré-visualização (espelho DANFE). É o mesmo da emissão, sem os campos que
+ * só fazem sentido ao emitir de verdade (idempotência, certificado, transmissão, pagamentos).
+ */
+export const previewDanfeSchema = emitirNFeSchema.omit({
+  idempotencyKey: true,
+  certificateVaultRef: true,
+  transmitirImediatamente: true,
+  pagamentos: true,
+});
+
 export const cancelarNFeSchema = z.object({
   justificativa: z
     .string()

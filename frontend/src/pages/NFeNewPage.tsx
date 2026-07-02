@@ -6,6 +6,7 @@ import { useAuthStore } from '@/features/auth/auth-store';
 import { listCertificates } from '@/features/certificates/certificates-api';
 import { listCompanies } from '@/features/companies/companies-api';
 import { getCustomer, listCustomers } from '@/features/customers/customers-api';
+import { DanfePreviewPanel } from '@/features/nfe/DanfePreviewPanel';
 import {
   emitirNFe,
   getNFe,
@@ -13,6 +14,7 @@ import {
   simulateTax,
   type FinalidadeNFe,
   type ModFrete,
+  type PreviewDanfePayload,
   type TipoOperacao,
 } from '@/features/nfe/nfe-api';
 import {
@@ -606,6 +608,109 @@ export function NFeNewPage(): React.ReactElement {
     },
     onError: (err) => setError(formatEmitError(err)),
   });
+
+  // Payload do espelho DANFE (pré-visualização). null enquanto faltam dados mínimos
+  // (cliente + ao menos um item com produto) — o painel mostra uma dica nesse caso.
+  const previewPayload = useMemo<PreviewDanfePayload | null>(() => {
+    const itensValidos = items.filter((it) => it.productId);
+    if (!customerId || itensValidos.length === 0) return null;
+
+    const chavesValidas = chavesReferenciadas
+      .map((c) => c.replace(/\D/g, ''))
+      .filter((c) => c.length === 44);
+
+    const transportadoraTemDado =
+      transpCnpjCpf || transpNome || transpIE || transpEndereco || transpMunicipio || transpUf;
+    const veiculoTemDado = veicPlaca && veicUf;
+    const volumeTemDado = volQtd || volEspecie || volPesoLiq || volPesoBruto;
+    const transporte =
+      transportadoraTemDado || veiculoTemDado || volumeTemDado
+        ? {
+            transportadora: transportadoraTemDado
+              ? {
+                  cnpjCpf: transpCnpjCpf || undefined,
+                  nome: transpNome || undefined,
+                  ie: transpIE || undefined,
+                  endereco: transpEndereco || undefined,
+                  municipio: transpMunicipio || undefined,
+                  uf: transpUf ? transpUf.toUpperCase() : undefined,
+                }
+              : undefined,
+            veiculo: veiculoTemDado
+              ? { placa: veicPlaca.toUpperCase(), uf: veicUf.toUpperCase() }
+              : undefined,
+            volumes: volumeTemDado
+              ? [
+                  {
+                    quantidade: volQtd ? Number(volQtd) : undefined,
+                    especie: volEspecie || undefined,
+                    pesoLiquido: volPesoLiq || undefined,
+                    pesoBruto: volPesoBruto || undefined,
+                  },
+                ]
+              : undefined,
+          }
+        : undefined;
+
+    return {
+      customerId,
+      serie,
+      numero: numero ? numero : undefined,
+      naturezaOperacao,
+      tipoOperacao,
+      finalidade,
+      modalidadeFrete: modFrete,
+      transporte,
+      nfeReferenciadas:
+        chavesValidas.length > 0
+          ? chavesValidas.map((chaveAcesso) => ({ chaveAcesso }))
+          : undefined,
+      infCpl: infCpl || undefined,
+      itens: itensValidos.map((it, idx) => ({
+        numeroItem: idx + 1,
+        productId: it.productId,
+        cfop: it.cfop,
+        unidadeComercial: productCacheRef.current[it.productId]?.unidadeComercial ?? 'UN',
+        quantidade: it.quantidade,
+        valorUnitario: it.valorUnitario,
+        valorDesconto: valorPositivoOuUndefined(it.valorDesconto),
+        valorFrete: valorPositivoOuUndefined(it.valorFrete),
+        ...(it.icmsCodigo
+          ? isSimples
+            ? { csosnIcms: it.icmsCodigo }
+            : { cstIcms: it.icmsCodigo }
+          : {}),
+      })),
+    };
+    // productCacheVersion entra nas deps para reidratar a unidadeComercial quando o cache
+    // do produto é preenchido após a seleção.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    customerId,
+    serie,
+    numero,
+    naturezaOperacao,
+    tipoOperacao,
+    finalidade,
+    chavesReferenciadas,
+    modFrete,
+    transpCnpjCpf,
+    transpNome,
+    transpIE,
+    transpEndereco,
+    transpMunicipio,
+    transpUf,
+    veicPlaca,
+    veicUf,
+    volQtd,
+    volEspecie,
+    volPesoLiq,
+    volPesoBruto,
+    items,
+    infCpl,
+    isSimples,
+    productCacheVersion,
+  ]);
 
   function updateItem(id: string, patch: Partial<ItemRow>): void {
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
@@ -1223,6 +1328,8 @@ export function NFeNewPage(): React.ReactElement {
           </Button>
         </CardContent>
       </Card>
+
+      <DanfePreviewPanel payload={previewPayload} />
     </div>
   );
 }

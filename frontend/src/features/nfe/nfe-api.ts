@@ -180,6 +180,42 @@ export async function emitirNFe(payload: EmitirNFePayload): Promise<EmitirNFeRes
   });
 }
 
+/**
+ * Payload da pré-visualização (espelho DANFE): mesmo da emissão, sem os campos que só
+ * existem ao emitir de verdade (idempotência, certificado, transmissão, pagamentos).
+ */
+export type PreviewDanfePayload = Omit<
+  EmitirNFePayload,
+  'idempotencyKey' | 'certificateVaultRef' | 'transmitirImediatamente' | 'pagamentos'
+>;
+
+/**
+ * Gera o PDF do espelho DANFE a partir do que está sendo digitado (sem emitir). Usa
+ * fetch + Blob porque o endpoint devolve application/pdf (o wrapper `api()` desempacota
+ * JSON). Retorna o Blob do PDF para exibir num iframe.
+ */
+export async function previewDanfe(payload: PreviewDanfePayload): Promise<Blob> {
+  const companyId = companyOrThrow();
+  const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3333';
+  const response = await fetch(`${baseUrl}/nfe/preview`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${useAuthStore.getState().accessToken}`,
+      'X-Company-Id': companyId,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    // O backend responde erro como JSON { error: { message } }; extrai a mensagem.
+    const err = (await response.json().catch(() => null)) as
+      | { error?: { message?: string } }
+      | null;
+    throw new Error(err?.error?.message ?? `Falha ao gerar a pré-visualização (HTTP ${response.status})`);
+  }
+  return response.blob();
+}
+
 export async function cancelNFe(
   id: string,
   payload: { justificativa: string; certificateVaultRef: string },
