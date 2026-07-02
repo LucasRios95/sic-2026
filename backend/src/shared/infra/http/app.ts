@@ -27,7 +27,20 @@ export function createApp(): Express {
   const app = express();
 
   app.disable('x-powered-by');
-  app.use(helmet());
+  app.use(
+    helmet({
+      // O espelho DANFE é exibido em <iframe src="blob:..."> (PDF gerado no cliente, mesma
+      // origem). O CSP padrão do helmet faz frame-src/object-src caírem em default-src 'self',
+      // que bloqueia blob: — daí o "conteúdo bloqueado" no iframe. Liberamos blob: só nesses
+      // dois diretivos; os demais defaults do helmet são preservados (useDefaults: true).
+      contentSecurityPolicy: {
+        directives: {
+          'frame-src': ["'self'", 'blob:'],
+          'object-src': ["'self'", 'blob:'],
+        },
+      },
+    }),
+  );
   app.use(
     cors({
       origin: (origin, callback) => {
