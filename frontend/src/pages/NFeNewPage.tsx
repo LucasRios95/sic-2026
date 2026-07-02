@@ -147,6 +147,8 @@ export function NFeNewPage(): React.ReactElement {
   const [infCpl, setInfCpl] = useState('');
   const [items, setItems] = useState<ItemRow[]>([makeRow()]);
   const [pagamentoMeio, setPagamentoMeio] = useState('01');
+  // Condição de pagamento (indPag): '0' = à vista, '1' = a prazo.
+  const [condicaoPagamento, setCondicaoPagamento] = useState<'0' | '1'>('0');
   const [certificateVaultRef, setCertificateVaultRef] = useState('');
   const [transmitirImediatamente, setTransmitirImediatamente] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -346,6 +348,7 @@ export function NFeNewPage(): React.ReactElement {
       infCpl,
       items,
       pagamentoMeio,
+      condicaoPagamento,
       certificateVaultRef,
       transmitirImediatamente,
       modFrete,
@@ -374,6 +377,7 @@ export function NFeNewPage(): React.ReactElement {
       infCpl,
       items,
       pagamentoMeio,
+      condicaoPagamento,
       certificateVaultRef,
       transmitirImediatamente,
       modFrete,
@@ -438,6 +442,7 @@ export function NFeNewPage(): React.ReactElement {
           : [makeRow()],
       );
       setPagamentoMeio(d.pagamentoMeio);
+      setCondicaoPagamento(d.condicaoPagamento ?? '0');
       setCertificateVaultRef(d.certificateVaultRef);
       setTransmitirImediatamente(d.transmitirImediatamente);
       setModFrete(d.modFrete);
@@ -585,7 +590,14 @@ export function NFeNewPage(): React.ReactElement {
                 : { cstIcms: it.icmsCodigo }
               : {}),
           })),
-        pagamentos: [{ meio: pagamentoMeio, valor: valorTotal }],
+        pagamentos: [
+          {
+            meio: pagamentoMeio,
+            valor: valorTotal,
+            // Sem pagamento (90) não leva condição; nos demais, à vista/a prazo.
+            indPag: pagamentoMeio === '90' ? undefined : condicaoPagamento,
+          },
+        ],
         certificateVaultRef: certificateVaultRef || undefined,
         transmitirImediatamente,
       });
@@ -883,19 +895,32 @@ export function NFeNewPage(): React.ReactElement {
             <CardTitle className="text-base">Pagamento / Certificado</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="space-y-1">
-              <Label>Meio de pagamento</Label>
-              <Select
-                value={pagamentoMeio}
-                onChange={(e) => setPagamentoMeio(e.target.value)}
-              >
-                <option value="01">Dinheiro</option>
-                <option value="03">Cartão de crédito</option>
-                <option value="04">Cartão de débito</option>
-                <option value="15">Boleto</option>
-                <option value="17">PIX</option>
-                <option value="90">Sem pagamento</option>
-              </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Meio de pagamento</Label>
+                <Select
+                  value={pagamentoMeio}
+                  onChange={(e) => setPagamentoMeio(e.target.value)}
+                >
+                  <option value="01">Dinheiro</option>
+                  <option value="03">Cartão de crédito</option>
+                  <option value="04">Cartão de débito</option>
+                  <option value="15">Boleto</option>
+                  <option value="17">PIX</option>
+                  <option value="90">Sem pagamento</option>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Condição de pagamento</Label>
+                <Select
+                  value={condicaoPagamento}
+                  onChange={(e) => setCondicaoPagamento(e.target.value as '0' | '1')}
+                  disabled={pagamentoMeio === '90'}
+                >
+                  <option value="0">À vista</option>
+                  <option value="1">A prazo</option>
+                </Select>
+              </div>
             </div>
             <div className="space-y-1">
               <Label>Certificado A1</Label>

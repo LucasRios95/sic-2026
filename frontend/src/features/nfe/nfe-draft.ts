@@ -24,6 +24,7 @@ export interface NFeDraft {
   infCpl: string;
   items: NFeDraftItem[];
   pagamentoMeio: string;
+  condicaoPagamento: '0' | '1';
   certificateVaultRef: string;
   transmitirImediatamente: boolean;
   modFrete: ModFrete;

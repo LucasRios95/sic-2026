@@ -66,16 +66,37 @@ export function DanfePreviewPanel({ payload }: DanfePreviewPanelProps): React.Re
             Espelho no formato do DANFE, gerado sob demanda. Sem valor fiscal até a emissão.
           </CardDescription>
         </div>
-        <Button
-          type="button"
-          variant={isStale ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => void generate(payloadKey)}
-          loading={loading}
-          disabled={!payload}
-        >
-          {pdfUrl ? 'Atualizar' : 'Gerar pré-visualização'}
-        </Button>
+        <div className="flex shrink-0 gap-2">
+          {pdfUrl ? (
+            <>
+              {/* Abrir em nova aba é navegação de topo — não passa por frame-src, então
+                  funciona mesmo se o CSP bloquear o iframe embutido. */}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(pdfUrl, '_blank', 'noopener')}
+              >
+                Abrir em nova aba
+              </Button>
+              <a href={pdfUrl} download="danfe-previa.pdf">
+                <Button type="button" variant="outline" size="sm">
+                  Baixar PDF
+                </Button>
+              </a>
+            </>
+          ) : null}
+          <Button
+            type="button"
+            variant={isStale ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => void generate(payloadKey)}
+            loading={loading}
+            disabled={!payload}
+          >
+            {pdfUrl ? 'Atualizar' : 'Gerar pré-visualização'}
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         {!payload ? (
@@ -96,11 +117,17 @@ export function DanfePreviewPanel({ payload }: DanfePreviewPanelProps): React.Re
               </div>
             ) : null}
             {pdfUrl ? (
-              <iframe
-                title="Pré-visualização do DANFE"
-                src={pdfUrl}
-                className="h-[820px] w-full rounded-md border bg-white"
-              />
+              <>
+                <iframe
+                  title="Pré-visualização do DANFE"
+                  src={pdfUrl}
+                  className="h-[820px] w-full rounded-md border bg-white"
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Não apareceu aqui? Use <strong>Abrir em nova aba</strong> ou{' '}
+                  <strong>Baixar PDF</strong> acima.
+                </p>
+              </>
             ) : (
               <div className="flex h-40 items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
                 {loading

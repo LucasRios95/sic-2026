@@ -535,6 +535,11 @@ export class NFeXmlBuilder {
     const pag = parent.ele('pag');
     for (const p of doc.pagamentos) {
       const det = pag.ele('detPag');
+      // indPag (0=à vista, 1=a prazo) é opcional e vem ANTES de tPag no leiaute 4.00.
+      // Não faz sentido em tPag=90 (sem pagamento), então omitimos nesse caso.
+      if (p.indPag && p.meio !== '90') {
+        det.ele('indPag').txt(p.indPag).up();
+      }
       det.ele('tPag').txt(p.meio).up();
       // tPag=90 (Sem pagamento) — ex.: devolução/remessa. A SEFAZ exige vPag=0.00 nesse
       // caso; informar o valor real dispara cStat 904 ("valor de pagamento informado

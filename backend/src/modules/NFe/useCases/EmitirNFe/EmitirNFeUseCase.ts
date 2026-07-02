@@ -918,6 +918,7 @@ export class EmitirNFeUseCase {
         meio: p.meio,
         valor: p.valor,
         bandeira: p.bandeira,
+        indPag: p.indPag,
       })),
       informacoesAdicionais: request.infCpl,
       informacoesFisco: request.infAdFisco,
@@ -953,6 +954,8 @@ export interface EmitirNFePagamentoInput {
   meio: string;
   valor: string;
   bandeira?: string;
+  /** Condição de pagamento (tag `indPag`): '0' = à vista, '1' = a prazo. */
+  indPag?: '0' | '1';
 }
 
 export interface EmitirNFeRequest {

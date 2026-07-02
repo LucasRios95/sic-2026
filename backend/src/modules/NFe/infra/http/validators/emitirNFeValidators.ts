@@ -100,6 +100,8 @@ export const emitirNFeSchema = z.object({
         meio: z.string().regex(/^\d{2}$/, 'meio deve ter 2 dígitos (tabela tPag)'),
         valor: decimalString,
         bandeira: z.string().max(10).optional(),
+        // Condição de pagamento: '0' = à vista, '1' = a prazo (tag indPag).
+        indPag: z.enum(['0', '1']).optional(),
       }),
     )
     .min(1),
@@ -118,6 +120,25 @@ export const previewDanfeSchema = emitirNFeSchema.omit({
   certificateVaultRef: true,
   transmitirImediatamente: true,
   pagamentos: true,
+});
+
+/** Importação de XMLs de NF-e emitidas (individual ou lote), como base64. */
+export const importarNFeEmitidaSchema = z.object({
+  arquivos: z
+    .array(
+      z.object({
+        nome: z.string().min(1).max(260),
+        xmlBase64: z.string().min(1),
+      }),
+    )
+    .min(1, 'Envie ao menos um arquivo XML')
+    .max(200, 'Máximo de 200 arquivos por importação'),
+});
+
+/** Query da exportação de XML por competência (mês/ano). */
+export const exportXmlCompetenciaSchema = z.object({
+  ano: z.coerce.number().int().min(2006).max(2100),
+  mes: z.coerce.number().int().min(1).max(12),
 });
 
 export const cancelarNFeSchema = z.object({

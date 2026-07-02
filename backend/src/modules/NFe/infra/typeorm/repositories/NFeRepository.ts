@@ -8,6 +8,7 @@ import {
   CreateNFePagamentoData,
   INFeRepository,
   ListNFesFilter,
+  NFeXmlExportRow,
 } from '../../../repositories/INFeRepository';
 import { NFe } from '../entities/NFe';
 import { NFeItem } from '../entities/NFeItem';
@@ -119,5 +120,29 @@ export class NFeRepository implements INFeRepository {
 
     const [items, total] = await qb.getManyAndCount();
     return { items, total };
+  }
+
+  async listXmlByPeriodo(
+    companyId: string,
+    from: Date,
+    to: Date,
+  ): Promise<NFeXmlExportRow[]> {
+    const rows = await this.repo
+      .createQueryBuilder('n')
+      .select([
+        'n.chave_acesso AS "chaveAcesso"',
+        'n.numero AS "numero"',
+        'n.serie AS "serie"',
+        'n.status AS "status"',
+        'COALESCE(n.xml_autorizado, n.xml_assinado) AS "xml"',
+      ])
+      .where('n.company_id = :companyId', { companyId })
+      .andWhere('n.dh_emissao BETWEEN :from AND :to', { from, to })
+      .andWhere('n.chave_acesso IS NOT NULL')
+      .andWhere('n.status IN (:...statuses)', { statuses: ['AUTHORIZED', 'CANCELLED'] })
+      .andWhere('COALESCE(n.xml_autorizado, n.xml_assinado) IS NOT NULL')
+      .orderBy('n.numero', 'ASC')
+      .getRawMany<NFeXmlExportRow>();
+    return rows;
   }
 }

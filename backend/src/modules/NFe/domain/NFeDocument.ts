@@ -311,6 +311,8 @@ export interface NFePagamento {
   meio: string; // tPag — 01..99
   valor: string;
   bandeira?: string;
+  /** Condição de pagamento (tag `indPag`): '0' = à vista, '1' = a prazo. Omitido = não informa. */
+  indPag?: '0' | '1';
 }
 
 export interface NFeDocument {

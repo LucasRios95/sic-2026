@@ -1,7 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 
+import { NFeImportExportActions } from '@/features/nfe/NFeImportExportActions';
 import { listNFes } from '@/features/nfe/nfe-api';
 import { Badge } from '@/shared/components/ui/Badge';
 import { Button } from '@/shared/components/ui/Button';
@@ -27,6 +28,7 @@ export function NFeListPage(): React.ReactElement {
   const [statusFilter, setStatusFilter] = useState<DocumentStatus | ''>('');
   const [search, setSearch] = useState('');
   const pagination = usePagination({ initialPageSize: 50 });
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     pagination.reset();
@@ -55,6 +57,9 @@ export function NFeListPage(): React.ReactElement {
           </p>
         </div>
         <div className="flex gap-2">
+          <NFeImportExportActions
+            onImported={() => queryClient.invalidateQueries({ queryKey: ['nfe'] })}
+          />
           <Link to="/fiscal/nfe/inutilizar">
             <Button variant="outline">Inutilizar faixa</Button>
           </Link>

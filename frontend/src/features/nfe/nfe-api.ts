@@ -155,7 +155,8 @@ export interface EmitirNFePayload {
   modalidadeFrete?: ModFrete;
   transporte?: NFeTransporteInput;
   itens: EmitirNFeItemPayload[];
-  pagamentos: Array<{ meio: string; valor: string }>;
+  /** indPag: '0' = à vista, '1' = a prazo (condição de pagamento). */
+  pagamentos: Array<{ meio: string; valor: string; indPag?: '0' | '1' }>;
   infCpl?: string;
   certificateVaultRef?: string;
   transmitirImediatamente?: boolean;
@@ -299,6 +300,69 @@ export async function downloadNFeXml(id: string): Promise<void> {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+export interface ImportXmlResultItem {
+  nome: string;
+  chaveAcesso: string;
+  numero: string;
+  serie: number;
+}
+
+export interface ImportXmlResult {
+  importados: ImportXmlResultItem[];
+  duplicados: ImportXmlResultItem[];
+  falhas: Array<{ nome: string; erro: string }>;
+}
+
+/**
+ * Importa XMLs de NF-e emitidas em outro sistema para o histórico de emitidas. Os arquivos
+ * já vêm como base64 (lidos no navegador). Retorna o resumo (importados/duplicados/falhas).
+ */
+export async function importNFeXml(
+  arquivos: Array<{ nome: string; xmlBase64: string }>,
+): Promise<ImportXmlResult> {
+  return api<ImportXmlResult>('/nfe/import-xml', {
+    method: 'POST',
+    body: { arquivos },
+    companyId: companyOrThrow(),
+  });
+}
+
+/**
+ * Exporta, num ZIP, os XMLs de todas as NF-e emitidas numa competência (mês/ano) e dispara
+ * o download. Retorna a quantidade de XMLs no pacote. Usa fetch + Blob porque devolve binário.
+ */
+export async function exportXmlCompetencia(ano: number, mes: number): Promise<number> {
+  const companyId = companyOrThrow();
+  const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3333';
+  const response = await fetch(`${baseUrl}/nfe/export-xml?ano=${ano}&mes=${mes}`, {
+    headers: {
+      Authorization: `Bearer ${useAuthStore.getState().accessToken}`,
+      'X-Company-Id': companyId,
+    },
+  });
+  if (!response.ok) {
+    const err = (await response.json().catch(() => null)) as
+      | { error?: { message?: string } }
+      | null;
+    throw new Error(err?.error?.message ?? `Falha ao exportar XMLs (HTTP ${response.status})`);
+  }
+  const total = Number(response.headers.get('X-Nfe-Total') ?? '0');
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const filename =
+    disposition.match(/filename="([^"]+)"/)?.[1] ??
+    `nfe-emitidas-${ano}-${String(mes).padStart(2, '0')}.zip`;
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return total;
 }
 
 export async function sendNFeByEmail(

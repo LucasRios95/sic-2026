@@ -8,7 +8,9 @@ import { EmitirEpecController } from '@modules/NFe/useCases/EmitirEpec/EmitirEpe
 import { EmitirNFeController } from '@modules/NFe/useCases/EmitirNFe/EmitirNFeController';
 import { GenerateDanfeController } from '@modules/NFe/useCases/GenerateDanfe/GenerateDanfeController';
 import { GetNFeController } from '@modules/NFe/useCases/GetNFe/GetNFeController';
+import { ExportXmlCompetenciaController } from '@modules/NFe/useCases/ExportXmlCompetencia/ExportXmlCompetenciaController';
 import { GetProximoNumeroController } from '@modules/NFe/useCases/GetProximoNumero/GetProximoNumeroController';
+import { ImportarNFeEmitidaController } from '@modules/NFe/useCases/ImportarNFeEmitida/ImportarNFeEmitidaController';
 import { InutilizarNumeracaoController } from '@modules/NFe/useCases/InutilizarNumeracao/InutilizarNumeracaoController';
 import { ListNFesController } from '@modules/NFe/useCases/ListNFes/ListNFesController';
 import { PreviewDanfeController } from '@modules/NFe/useCases/PreviewDanfe/PreviewDanfeController';
@@ -24,6 +26,8 @@ import {
   emitirCceSchema,
   emitirEpecSchema,
   emitirNFeSchema,
+  exportXmlCompetenciaSchema,
+  importarNFeEmitidaSchema,
   inutilizarNumeracaoSchema,
   listNFesQuerySchema,
   previewDanfeSchema,
@@ -44,6 +48,8 @@ const proximoNumeroController = new GetProximoNumeroController();
 const listController = new ListNFesController();
 const danfeController = new GenerateDanfeController();
 const previewDanfeController = new PreviewDanfeController();
+const importarController = new ImportarNFeEmitidaController();
+const exportXmlController = new ExportXmlCompetenciaController();
 const downloadXmlController = new DownloadXmlController();
 const sendEmailController = new SendNFeByEmailController();
 
@@ -71,6 +77,14 @@ nfeRoutes.get(
   requirePermission('nfe.emit', 'nfe.read', 'admin.full'),
   (req, res) => proximoNumeroController.handle(req, res),
 );
+// Exportação de XML em lote por competência (mês/ano) — devolve um ZIP. Deve vir ANTES
+// de GET /:id, senão "export-xml" seria capturado como :id.
+nfeRoutes.get(
+  '/export-xml',
+  requirePermission('nfe.read', 'nfe.emit', 'admin.full'),
+  validate({ query: exportXmlCompetenciaSchema }),
+  (req, res) => exportXmlController.handle(req, res),
+);
 nfeRoutes.get(
   '/:id',
   requirePermission('nfe.read', 'nfe.emit', 'admin.full'),
@@ -92,6 +106,14 @@ nfeRoutes.post(
   requirePermission('nfe.emit', 'admin.full'),
   validate({ body: previewDanfeSchema }),
   (req, res) => previewDanfeController.handle(req, res),
+);
+
+// Importa XMLs de NF-e emitidas em outro sistema para o histórico (só emitente = empresa).
+nfeRoutes.post(
+  '/import-xml',
+  requirePermission('nfe.emit', 'admin.full'),
+  validate({ body: importarNFeEmitidaSchema }),
+  (req, res) => importarController.handle(req, res),
 );
 nfeRoutes.post(
   '/:id/cancel',

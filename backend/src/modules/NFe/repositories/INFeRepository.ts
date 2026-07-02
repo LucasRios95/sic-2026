@@ -40,6 +40,15 @@ export interface ListNFesFilter {
   offset?: number;
 }
 
+/** Linha enxuta para exportação de XML em lote (não carrega o agregado inteiro). */
+export interface NFeXmlExportRow {
+  chaveAcesso: string;
+  numero: string;
+  serie: number;
+  status: string;
+  xml: string;
+}
+
 export interface INFeRepository {
   findByIdempotencyKey(key: string): Promise<NFe | null>;
   findById(companyId: string, id: string): Promise<NFe | null>;
@@ -65,6 +74,11 @@ export interface INFeRepository {
   ): Promise<NFe>;
   update(id: string, patch: Partial<NFe>): Promise<NFe>;
   list(filter: ListNFesFilter): Promise<{ items: NFe[]; total: number }>;
+  /**
+   * Lista, para exportação em lote, as NF-e com XML disponível emitidas no período
+   * [from, to]. Só notas com chave e XML (AUTHORIZED/CANCELLED). Projeção enxuta.
+   */
+  listXmlByPeriodo(companyId: string, from: Date, to: Date): Promise<NFeXmlExportRow[]>;
   /** Localiza NFe pelo escopo (companyId+modelo+serie+numero) — usado pra detectar
    * reuso de numero quando a anterior nao chegou a virar NFe valida. */
   findByScope(
