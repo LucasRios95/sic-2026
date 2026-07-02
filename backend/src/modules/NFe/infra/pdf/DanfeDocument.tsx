@@ -205,6 +205,28 @@ const MOD_FRETE_LABEL: Record<string, string> = {
   '9': '9 - Sem ocorrência',
 };
 
+/** Dados de transporte para o quadro do DANFE. Não são persistidos na entidade NFe — vêm
+ *  do payload (preview) ou são extraídos do XML (DANFE autorizado). */
+export interface DanfeTransporte {
+  transportadora?: {
+    cnpjCpf?: string | null;
+    nome?: string | null;
+    ie?: string | null;
+    endereco?: string | null;
+    municipio?: string | null;
+    uf?: string | null;
+  } | null;
+  veiculo?: { placa?: string | null; uf?: string | null; rntc?: string | null } | null;
+  volumes?: Array<{
+    quantidade?: string | number | null;
+    especie?: string | null;
+    marca?: string | null;
+    numeracao?: string | null;
+    pesoLiquido?: string | null;
+    pesoBruto?: string | null;
+  }> | null;
+}
+
 export interface DanfeProps {
   nfe: NFe & { items: NFeItem[] };
   emitente: Company;
@@ -235,6 +257,7 @@ export function DanfeDocument({
   preview,
   modalidadeFrete,
   consumidorFinal,
+  transporte,
 }: DanfeProps): React.ReactElement {
   const isHomologacao = nfe.ambiente === AmbienteSefaz.HOMOLOGACAO;
   const chave = nfe.chaveAcesso ?? '';
@@ -242,6 +265,35 @@ export function DanfeDocument({
   const qrUri = qrCodePng ? `data:image/png;base64,${qrCodePng.toString('base64')}` : null;
   const dhEmissao = new Date(nfe.dhEmissao);
   const dhSaiEnt = nfe.dhSaiEnt ? new Date(nfe.dhSaiEnt) : null;
+
+  // Valores de exibição do quadro de transporte (fallback "—"). Volumes são agregados:
+  // quantidade e pesos somados; espécie/marca/numeração do primeiro volume.
+  const transportadora = transporte?.transportadora ?? null;
+  const veiculo = transporte?.veiculo ?? null;
+  const volumes = transporte?.volumes ?? [];
+  const somaVol = (campo: 'quantidade' | 'pesoLiquido' | 'pesoBruto'): number =>
+    volumes.reduce((acc, v) => acc + (Number(v[campo]) || 0), 0);
+  const totalQtdVol = somaVol('quantidade');
+  const totalPesoLiq = somaVol('pesoLiquido');
+  const totalPesoBruto = somaVol('pesoBruto');
+  const vol0 = volumes[0];
+  const transp = {
+    nome: dash(transportadora?.nome),
+    cnpjCpf: transportadora?.cnpjCpf ? formatCnpjCpf(transportadora.cnpjCpf) : '—',
+    ie: dash(transportadora?.ie),
+    endereco: dash(transportadora?.endereco),
+    municipio: dash(transportadora?.municipio),
+    ufTransp: dash(transportadora?.uf),
+    placa: dash(veiculo?.placa),
+    ufVeic: dash(veiculo?.uf),
+    rntc: dash(veiculo?.rntc),
+    quantidade: totalQtdVol > 0 ? String(totalQtdVol) : '—',
+    especie: dash(vol0?.especie),
+    marca: dash(vol0?.marca),
+    numeracao: dash(vol0?.numeracao),
+    pesoBruto: totalPesoBruto > 0 ? formatDecimal(totalPesoBruto, 3) : '—',
+    pesoLiquido: totalPesoLiq > 0 ? formatDecimal(totalPesoLiq, 3) : '—',
+  };
 
   return (
     <Document>
@@ -542,7 +594,7 @@ export function DanfeDocument({
           <View style={[styles.colBorderBottom, styles.row]}>
             <View style={[styles.colBorderRight, styles.field, { flex: 3 }]}>
               <Text style={styles.fieldLabel}>NOME / RAZÃO SOCIAL</Text>
-              <Text style={styles.fieldValue}>—</Text>
+              <Text style={styles.fieldValue}>{transp.nome}</Text>
             </View>
             <View style={[styles.colBorderRight, styles.field, { flex: 2 }]}>
               <Text style={styles.fieldLabel}>FRETE POR CONTA</Text>
@@ -552,63 +604,63 @@ export function DanfeDocument({
             </View>
             <View style={[styles.colBorderRight, styles.field, { flex: 1 }]}>
               <Text style={styles.fieldLabel}>CÓDIGO ANTT</Text>
-              <Text style={styles.fieldValue}>—</Text>
+              <Text style={styles.fieldValue}>{transp.rntc}</Text>
             </View>
             <View style={[styles.colBorderRight, styles.field, { flex: 1 }]}>
               <Text style={styles.fieldLabel}>PLACA</Text>
-              <Text style={styles.fieldValue}>—</Text>
+              <Text style={styles.fieldValue}>{transp.placa}</Text>
             </View>
             <View style={[styles.colBorderRight, styles.field, { flex: 0.5 }]}>
               <Text style={styles.fieldLabel}>UF</Text>
-              <Text style={styles.fieldValue}>—</Text>
+              <Text style={styles.fieldValue}>{transp.ufVeic}</Text>
             </View>
             <View style={[styles.field, { flex: 1.5 }]}>
               <Text style={styles.fieldLabel}>CNPJ / CPF</Text>
-              <Text style={styles.fieldValue}>—</Text>
+              <Text style={styles.fieldValue}>{transp.cnpjCpf}</Text>
             </View>
           </View>
           <View style={[styles.colBorderBottom, styles.row]}>
             <View style={[styles.colBorderRight, styles.field, { flex: 4 }]}>
               <Text style={styles.fieldLabel}>ENDEREÇO</Text>
-              <Text style={styles.fieldValue}>—</Text>
+              <Text style={styles.fieldValue}>{transp.endereco}</Text>
             </View>
             <View style={[styles.colBorderRight, styles.field, { flex: 2 }]}>
               <Text style={styles.fieldLabel}>MUNICÍPIO</Text>
-              <Text style={styles.fieldValue}>—</Text>
+              <Text style={styles.fieldValue}>{transp.municipio}</Text>
             </View>
             <View style={[styles.colBorderRight, styles.field, { flex: 0.5 }]}>
               <Text style={styles.fieldLabel}>UF</Text>
-              <Text style={styles.fieldValue}>—</Text>
+              <Text style={styles.fieldValue}>{transp.ufTransp}</Text>
             </View>
             <View style={[styles.field, { flex: 2 }]}>
               <Text style={styles.fieldLabel}>INSCRIÇÃO ESTADUAL</Text>
-              <Text style={styles.fieldValue}>—</Text>
+              <Text style={styles.fieldValue}>{transp.ie}</Text>
             </View>
           </View>
           <View style={styles.row}>
             <View style={[styles.colBorderRight, styles.field, { flex: 1 }]}>
               <Text style={styles.fieldLabel}>QUANTIDADE</Text>
-              <Text style={styles.fieldValue}>—</Text>
+              <Text style={styles.fieldValue}>{transp.quantidade}</Text>
             </View>
             <View style={[styles.colBorderRight, styles.field, { flex: 2 }]}>
               <Text style={styles.fieldLabel}>ESPÉCIE</Text>
-              <Text style={styles.fieldValue}>—</Text>
+              <Text style={styles.fieldValue}>{transp.especie}</Text>
             </View>
             <View style={[styles.colBorderRight, styles.field, { flex: 1 }]}>
               <Text style={styles.fieldLabel}>MARCA</Text>
-              <Text style={styles.fieldValue}>—</Text>
+              <Text style={styles.fieldValue}>{transp.marca}</Text>
             </View>
             <View style={[styles.colBorderRight, styles.field, { flex: 1 }]}>
               <Text style={styles.fieldLabel}>NUMERAÇÃO</Text>
-              <Text style={styles.fieldValue}>—</Text>
+              <Text style={styles.fieldValue}>{transp.numeracao}</Text>
             </View>
             <View style={[styles.colBorderRight, styles.field, { flex: 1.5 }]}>
               <Text style={styles.fieldLabel}>PESO BRUTO</Text>
-              <Text style={styles.fieldValue}>—</Text>
+              <Text style={styles.fieldValue}>{transp.pesoBruto}</Text>
             </View>
             <View style={[styles.field, { flex: 1.5 }]}>
               <Text style={styles.fieldLabel}>PESO LÍQUIDO</Text>
-              <Text style={styles.fieldValue}>—</Text>
+              <Text style={styles.fieldValue}>{transp.pesoLiquido}</Text>
             </View>
           </View>
         </View>
@@ -863,6 +915,12 @@ function ImpostoCell({
 // ============================================================================
 // Helpers de formatação
 // ============================================================================
+
+/** Valor textual com fallback "—" quando vazio/nulo. */
+function dash(value: string | null | undefined): string {
+  const text = (value ?? '').toString().trim();
+  return text || '—';
+}
 
 function formatCnpj(cnpj: string): string {
   const digits = (cnpj ?? '').replace(/\D/g, '');

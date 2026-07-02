@@ -14,7 +14,7 @@ import { logger } from '@shared/logger';
 import { ChaveAcesso } from '../../domain/ChaveAcesso';
 import { FinalidadeNFe, TipoOperacao } from '../../domain/nfe-enums';
 import { renderChaveAcessoBarcode, renderConsultaQrCode } from '../../infra/pdf/barcode';
-import { DanfeDocument } from '../../infra/pdf/DanfeDocument';
+import { DanfeDocument, type DanfeTransporte } from '../../infra/pdf/DanfeDocument';
 import { NFe } from '../../infra/typeorm/entities/NFe';
 import { NFeItem } from '../../infra/typeorm/entities/NFeItem';
 import { aplicarOverrideIcms } from '../EmitirNFe/EmitirNFeUseCase';
@@ -213,6 +213,7 @@ export class PreviewDanfeUseCase {
         preview: true,
         modalidadeFrete: request.modalidadeFrete,
         consumidorFinal: customer.consumidorFinal,
+        transporte: request.transporte,
       }),
     );
   }
@@ -297,6 +298,7 @@ export interface PreviewDanfeRequest {
   tipoOperacao?: TipoOperacao;
   finalidade?: FinalidadeNFe;
   modalidadeFrete?: number;
+  transporte?: DanfeTransporte;
   itens: PreviewDanfeItemInput[];
   infCpl?: string;
 }

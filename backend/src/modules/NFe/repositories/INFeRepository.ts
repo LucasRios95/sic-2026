@@ -75,10 +75,11 @@ export interface INFeRepository {
   update(id: string, patch: Partial<NFe>): Promise<NFe>;
   list(filter: ListNFesFilter): Promise<{ items: NFe[]; total: number }>;
   /**
-   * Lista, para exportação em lote, as NF-e com XML disponível emitidas no período
-   * [from, to]. Só notas com chave e XML (AUTHORIZED/CANCELLED). Projeção enxuta.
+   * Lista, para exportação em lote, as NF-e com XML disponível emitidas na competência
+   * (ano/mês). O mês é avaliado no horário de Brasília (America/Sao_Paulo) para bater com
+   * a data que aparece na nota — não em UTC. Só notas com chave e XML (AUTHORIZED/CANCELLED).
    */
-  listXmlByPeriodo(companyId: string, from: Date, to: Date): Promise<NFeXmlExportRow[]>;
+  listXmlByPeriodo(companyId: string, ano: number, mes: number): Promise<NFeXmlExportRow[]>;
   /** Localiza NFe pelo escopo (companyId+modelo+serie+numero) — usado pra detectar
    * reuso de numero quando a anterior nao chegou a virar NFe valida. */
   findByScope(

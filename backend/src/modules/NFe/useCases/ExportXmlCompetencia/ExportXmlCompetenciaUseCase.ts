@@ -32,11 +32,9 @@ export class ExportXmlCompetenciaUseCase {
     if (mes < 1 || mes > 12) {
       throw new BusinessRuleError('Mês inválido (1-12)', 'INVALID_COMPETENCIA');
     }
-    // Intervalo [início do mês, início do mês seguinte) — cobre o mês inteiro em UTC.
-    const from = new Date(Date.UTC(ano, mes - 1, 1, 0, 0, 0, 0));
-    const to = new Date(Date.UTC(ano, mes, 1, 0, 0, 0, 0) - 1);
-
-    const rows = await this.nfeRepository.listXmlByPeriodo(companyId, from, to);
+    // O mês é avaliado no horário de Brasília dentro do repositório (AT TIME ZONE),
+    // para bater com a data de emissão que aparece na nota — não em UTC.
+    const rows = await this.nfeRepository.listXmlByPeriodo(companyId, ano, mes);
     if (rows.length === 0) {
       throw new BusinessRuleError(
         `Nenhuma NF-e com XML encontrada na competência ${String(mes).padStart(2, '0')}/${ano}.`,

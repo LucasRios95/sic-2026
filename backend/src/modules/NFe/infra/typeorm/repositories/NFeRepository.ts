@@ -124,9 +124,12 @@ export class NFeRepository implements INFeRepository {
 
   async listXmlByPeriodo(
     companyId: string,
-    from: Date,
-    to: Date,
+    ano: number,
+    mes: number,
   ): Promise<NFeXmlExportRow[]> {
+    // Competência avaliada no horário de Brasília: converte dh_emissao (timestamptz, UTC)
+    // para o wall-clock local e compara com [1º do mês, 1º do mês seguinte). Assim uma nota
+    // emitida 30/06 22:00 BRT (=01/07 01:00 UTC) continua contando como junho.
     const rows = await this.repo
       .createQueryBuilder('n')
       .select([
@@ -137,7 +140,13 @@ export class NFeRepository implements INFeRepository {
         'COALESCE(n.xml_autorizado, n.xml_assinado) AS "xml"',
       ])
       .where('n.company_id = :companyId', { companyId })
-      .andWhere('n.dh_emissao BETWEEN :from AND :to', { from, to })
+      .andWhere(
+        "(n.dh_emissao AT TIME ZONE 'America/Sao_Paulo') >= make_date(:ano, :mes, 1)",
+        { ano, mes },
+      )
+      .andWhere(
+        "(n.dh_emissao AT TIME ZONE 'America/Sao_Paulo') < (make_date(:ano, :mes, 1) + interval '1 month')",
+      )
       .andWhere('n.chave_acesso IS NOT NULL')
       .andWhere('n.status IN (:...statuses)', { statuses: ['AUTHORIZED', 'CANCELLED'] })
       .andWhere('COALESCE(n.xml_autorizado, n.xml_assinado) IS NOT NULL')

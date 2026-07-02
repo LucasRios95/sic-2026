@@ -1,4 +1,5 @@
 import { renderToBuffer } from '@react-pdf/renderer';
+import { XMLParser } from 'fast-xml-parser';
 import React from 'react';
 import { inject, injectable } from 'tsyringe';
 
@@ -9,7 +10,7 @@ import { BusinessRuleError, NotFoundError } from '@shared/errors';
 
 import { DocumentStatus } from '../../domain/nfe-enums';
 import { renderChaveAcessoBarcode, renderConsultaQrCode } from '../../infra/pdf/barcode';
-import { DanfeDocument } from '../../infra/pdf/DanfeDocument';
+import { DanfeDocument, type DanfeTransporte } from '../../infra/pdf/DanfeDocument';
 import { NFe } from '../../infra/typeorm/entities/NFe';
 import { NFeItem } from '../../infra/typeorm/entities/NFeItem';
 import { INFeRepository } from '../../repositories/INFeRepository';
@@ -105,6 +106,7 @@ export class GenerateDanfeUseCase {
     const modalidadeFrete = extractModFrete(xmlFonte);
     const indFinalXml = extractIndFinal(xmlFonte);
     const consumidorFinal = indFinalXml ?? customer?.consumidorFinal ?? false;
+    const transporte = extractTransporte(xmlFonte);
 
     const pdfBuffer = await renderToBuffer(
       React.createElement(DanfeDocument, {
@@ -115,6 +117,7 @@ export class GenerateDanfeUseCase {
         qrCodePng,
         modalidadeFrete,
         consumidorFinal,
+        transporte,
       }),
     );
 
@@ -147,4 +150,74 @@ function extractIndFinal(xml: string | null | undefined): boolean | undefined {
   if (!xml) return undefined;
   const match = xml.match(/<indFinal>\s*(\d)\s*<\/indFinal>/);
   return match ? match[1] === '1' : undefined;
+}
+
+const transpXmlParser = new XMLParser({
+  ignoreAttributes: true,
+  removeNSPrefix: true,
+  parseTagValue: false,
+});
+
+/** Extrai o bloco de transporte (transportadora, veículo, volumes) do XML da NF-e. */
+function extractTransporte(xml: string | null | undefined): DanfeTransporte | undefined {
+  if (!xml) return undefined;
+  try {
+    const parsed = transpXmlParser.parse(xml) as Record<string, unknown>;
+    const transp = asRec(findDeep(parsed, 'transp'));
+    if (!transp) return undefined;
+
+    const ta = asRec(transp.transporta);
+    const ve = asRec(transp.veicTransp);
+    const volRaw = transp.vol;
+    const vols = Array.isArray(volRaw) ? volRaw : volRaw ? [volRaw] : [];
+
+    return {
+      transportadora: ta
+        ? {
+            cnpjCpf: s(ta.CNPJ) ?? s(ta.CPF),
+            nome: s(ta.xNome),
+            ie: s(ta.IE),
+            endereco: s(ta.xEnder),
+            municipio: s(ta.xMun),
+            uf: s(ta.UF),
+          }
+        : null,
+      veiculo: ve
+        ? { placa: s(ve.placa), uf: s(ve.UF), rntc: s(ve.RNTC) }
+        : null,
+      volumes: vols.map((v) => {
+        const vol = asRec(v) ?? {};
+        return {
+          quantidade: s(vol.qVol),
+          especie: s(vol.esp),
+          marca: s(vol.marca),
+          numeracao: s(vol.nVol),
+          pesoLiquido: s(vol.pesoL),
+          pesoBruto: s(vol.pesoB),
+        };
+      }),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function asRec(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
+function s(value: unknown): string | null {
+  const text = String(value ?? '').trim();
+  return text || null;
+}
+
+function findDeep(obj: unknown, key: string): unknown {
+  if (!obj || typeof obj !== 'object') return null;
+  const rec = obj as Record<string, unknown>;
+  if (key in rec) return rec[key];
+  for (const v of Object.values(rec)) {
+    const found = findDeep(v, key);
+    if (found !== null && found !== undefined) return found;
+  }
+  return null;
 }
