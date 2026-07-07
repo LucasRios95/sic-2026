@@ -311,6 +311,8 @@ export interface ImportXmlResultItem {
 
 export interface ImportXmlResult {
   importados: ImportXmlResultItem[];
+  /** Notas que já existiam sem XML e tiveram o XML completado (ex.: histórico legado). */
+  atualizados: ImportXmlResultItem[];
   duplicados: ImportXmlResultItem[];
   falhas: Array<{ nome: string; erro: string }>;
 }

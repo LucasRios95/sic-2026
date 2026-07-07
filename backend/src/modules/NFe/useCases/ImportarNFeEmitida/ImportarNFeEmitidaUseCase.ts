@@ -33,6 +33,8 @@ interface ImportResultItem {
 
 interface IResponse {
   importados: ImportResultItem[];
+  /** Notas que já existiam SEM XML (ex.: importação legada) e tiveram o XML completado. */
+  atualizados: ImportResultItem[];
   duplicados: ImportResultItem[];
   falhas: ImportFailure[];
 }
@@ -69,7 +71,7 @@ export class ImportarNFeEmitidaUseCase {
     if (!company) throw new NotFoundError('Empresa não encontrada');
 
     const companyCnpj = (company.cnpj ?? '').replace(/\D/g, '');
-    const response: IResponse = { importados: [], duplicados: [], falhas: [] };
+    const response: IResponse = { importados: [], atualizados: [], duplicados: [], falhas: [] };
 
     for (const arquivo of request.arquivos) {
       try {
@@ -96,6 +98,27 @@ export class ImportarNFeEmitidaUseCase {
           parsed.numero,
         );
         if (existente) {
+          const jaTemXml = !!(existente.xmlAutorizado || existente.xmlAssinado);
+          if (!jaTemXml) {
+            // Nota já existe mas sem XML (ex.: veio da importação legada só com o resumo).
+            // Completamos com o XML real + protocolo — assim passa a ser exportável.
+            await this.nfeRepository.update(existente.id, {
+              status: DocumentStatus.AUTHORIZED,
+              cStat: parsed.cStat,
+              xMotivo: parsed.xMotivo,
+              protocoloAutorizacao: parsed.protocolo,
+              dhAutorizacao: parsed.dhAutorizacao,
+              chaveAcesso: parsed.chaveAcesso,
+              xmlAutorizado: xml,
+            });
+            response.atualizados.push({
+              nome: arquivo.nome,
+              chaveAcesso: parsed.chaveAcesso,
+              numero: parsed.numero,
+              serie: parsed.serie,
+            });
+            continue;
+          }
           response.duplicados.push({
             nome: arquivo.nome,
             chaveAcesso: parsed.chaveAcesso,
@@ -215,6 +238,7 @@ export class ImportarNFeEmitidaUseCase {
       entityId: company.id,
       payload: {
         importados: response.importados.length,
+        atualizados: response.atualizados.length,
         duplicados: response.duplicados.length,
         falhas: response.falhas.length,
       },

@@ -734,6 +734,11 @@ export class EmitirNFeUseCase {
     formaEmissao: FormaEmissao,
   ): NFeDocument {
     const operacaoInterestadual = customer.uf !== company.uf;
+    // Simples Nacional (CRT 1/2/4) NÃO destaca IPI na NF-e (recolhido no DAS). Mesmo que um
+    // produto tenha CST de IPI cadastrado (ex.: dado herdado de importação legada), suprimimos
+    // o grupo IPI para essas empresas — evita rejeição e IPI indevido. Regime Normal respeita
+    // o que o produto foi parametrizado.
+    const suprimeIpi = company.crt !== CodigoRegimeTributario.REGIME_NORMAL;
     // Só emite vDesc/vFrete/vSeg/vOutro no item quando > 0 (evita zeros no XML).
     const positivo = (v?: string | null): string | undefined =>
       v && Number(v) > 0 ? v : undefined;
@@ -855,11 +860,11 @@ export class EmitirNFeUseCase {
           baseFCPUFDest: r.baseFCPUFDest,
           pFCPUFDest: r.pFCPUFDest,
           valorFCPUFDest: r.valorFCPUFDest,
-          cstIpi: tr.cstIpi ?? undefined,
-          cEnq: tr.cEnq ?? undefined,
-          baseIpi: r.baseIpi,
-          aliqIpi: r.aliqIpi,
-          valorIpi: r.valorIpi,
+          cstIpi: suprimeIpi ? undefined : tr.cstIpi ?? undefined,
+          cEnq: suprimeIpi ? undefined : tr.cEnq ?? undefined,
+          baseIpi: suprimeIpi ? undefined : r.baseIpi,
+          aliqIpi: suprimeIpi ? undefined : r.aliqIpi,
+          valorIpi: suprimeIpi ? undefined : r.valorIpi,
           cstPis: tr.cstPis ?? undefined,
           basePis: r.basePis,
           aliqPis: r.aliqPis,

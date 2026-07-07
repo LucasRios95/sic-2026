@@ -448,6 +448,11 @@ interface TaxRuleFormState {
   aliqPis: string;
   cstCofins: string;
   aliqCofins: string;
+  /** Destacar IPI neste produto. Simples Nacional normalmente NÃO destaca (deixe desligado). */
+  temIpi: boolean;
+  cstIpi: string;
+  cEnq: string;
+  aliqIpi: string;
   cstIbsCbs: string;
   cClassTrib: string;
 }
@@ -461,6 +466,10 @@ const EMPTY_TAX_FORM: TaxRuleFormState = {
   aliqPis: '0',
   cstCofins: '49',
   aliqCofins: '0',
+  temIpi: false,
+  cstIpi: '99',
+  cEnq: '999',
+  aliqIpi: '0',
   cstIbsCbs: 'TRIBUTACAO_INTEGRAL',
   cClassTrib: '000001',
 };
@@ -476,6 +485,10 @@ function ruleToForm(rule: ProductTaxRule | undefined): TaxRuleFormState {
     aliqPis: rule.aliqPis ?? '0',
     cstCofins: rule.cstCofins ?? '49',
     aliqCofins: rule.aliqCofins ?? '0',
+    temIpi: !!rule.cstIpi,
+    cstIpi: rule.cstIpi ?? '99',
+    cEnq: rule.cEnq ?? '999',
+    aliqIpi: rule.aliqIpi ?? '0',
     cstIbsCbs: rule.cstIbsCbs ?? 'TRIBUTACAO_INTEGRAL',
     cClassTrib: rule.cClassTrib ?? '000001',
   };
@@ -558,6 +571,11 @@ function EditProductForm({ productId }: { productId: string }): React.ReactEleme
         aliqPis: tax.aliqPis || null,
         cstCofins: tax.cstCofins || null,
         aliqCofins: tax.aliqCofins || null,
+        // IPI só é destacado quando o produto está parametrizado com IPI. Desligado = null
+        // (sem grupo IPI na nota) — padrão para Simples Nacional.
+        cstIpi: tax.temIpi ? tax.cstIpi || null : null,
+        cEnq: tax.temIpi ? tax.cEnq || '999' : null,
+        aliqIpi: tax.temIpi ? tax.aliqIpi || null : null,
         cstIbsCbs: tax.cstIbsCbs || null,
         cClassTrib: tax.cClassTrib || null,
       });
@@ -781,6 +799,58 @@ function EditProductForm({ productId }: { productId: string }): React.ReactEleme
                   <p className="mt-2 text-xs text-muted-foreground">
                     Empresas do Simples Nacional usam CST 49 com alíquota 0 — pago via DAS.
                   </p>
+                </div>
+
+                <div className="border-t border-border pt-4">
+                  <label className="flex items-center gap-2 text-sm font-semibold mb-2">
+                    <input
+                      type="checkbox"
+                      checked={tax.temIpi}
+                      onChange={(e) => setTax((f) => ({ ...f, temIpi: e.target.checked }))}
+                    />
+                    Destacar IPI neste produto
+                  </label>
+                  {tax.temIpi ? (
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="space-y-1">
+                        <Label>CST IPI</Label>
+                        <Select value={tax.cstIpi} onChange={(e) => setTax((f) => ({ ...f, cstIpi: e.target.value }))}>
+                          <option value="00">00 — Entrada com recuperação de crédito</option>
+                          <option value="49">49 — Outras entradas</option>
+                          <option value="50">50 — Saída tributada</option>
+                          <option value="51">51 — Saída tributada com alíquota zero</option>
+                          <option value="52">52 — Saída isenta</option>
+                          <option value="53">53 — Saída não tributada</option>
+                          <option value="54">54 — Saída imune</option>
+                          <option value="55">55 — Saída com suspensão</option>
+                          <option value="99">99 — Outras saídas</option>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Cód. enquadramento (cEnq)</Label>
+                        <Input
+                          value={tax.cEnq}
+                          onChange={(e) => setTax((f) => ({ ...f, cEnq: e.target.value }))}
+                          maxLength={3}
+                          placeholder="999"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Alíquota IPI (%)</Label>
+                        <Input
+                          value={tax.aliqIpi}
+                          onChange={(e) => setTax((f) => ({ ...f, aliqIpi: e.target.value }))}
+                          placeholder="0"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Sem destaque de IPI (nenhum grupo IPI na nota). No Simples Nacional, deixe
+                      desligado — o IPI não é destacado. Ative apenas para produtos industrializados
+                      com IPI aplicável.
+                    </p>
+                  )}
                 </div>
 
                 <div className="border-t border-border pt-4">

@@ -55,10 +55,11 @@ export function NFeImportExportActions({
       );
       const result = await importNFeXml(arquivos);
       setImportResult(result);
-      if (result.importados.length > 0) onImported();
+      if (result.importados.length > 0 || result.atualizados.length > 0) onImported();
     } catch (e) {
       setImportResult({
         importados: [],
+        atualizados: [],
         duplicados: [],
         falhas: [{ nome: '—', erro: e instanceof Error ? e.message : 'Falha ao importar' }],
       });
@@ -156,9 +157,12 @@ export function NFeImportExportActions({
       >
         {importResult ? (
           <div className="space-y-3 text-sm">
-            <div className="flex gap-4">
+            <div className="flex flex-wrap gap-4">
               <span className="text-green-700">
                 Importadas: <strong>{importResult.importados.length}</strong>
+              </span>
+              <span className="text-blue-700">
+                XML completado: <strong>{importResult.atualizados.length}</strong>
               </span>
               <span className="text-amber-700">
                 Duplicadas: <strong>{importResult.duplicados.length}</strong>

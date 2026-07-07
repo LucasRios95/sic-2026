@@ -335,7 +335,10 @@ export class NFeXmlBuilder {
   private appendIpi(imposto: XMLBuilder, item: NFeItem): void {
     if (!item.cstIpi) return;
     const ipi = imposto.ele('IPI');
-    if (item.cEnq) ipi.ele('cEnq').txt(item.cEnq).up();
+    // cEnq (código de enquadramento legal do IPI) é OBRIGATÓRIO no grupo IPI e precede
+    // IPITrib/IPINT. Sem ele o XSD rejeita (cStat 225: "IPITrib não esperado"). Quando o
+    // produto não define, usamos "999" (Tributação normal IPI — outros), o código genérico.
+    ipi.ele('cEnq').txt(item.cEnq ?? '999').up();
     const isTributado = ['00', '49', '50', '99'].includes(item.cstIpi);
     const group = ipi.ele(isTributado ? 'IPITrib' : 'IPINT');
     group.ele('CST').txt(item.cstIpi).up();
