@@ -19,6 +19,7 @@ export interface ICreateCustomerDTO {
   logradouro: string;
   numero: string;
   complemento?: string | null;
+  pontoReferencia?: string | null;
   bairro: string;
   codigoMunicipioIbge: string;
   municipio: string;
@@ -26,6 +27,7 @@ export interface ICreateCustomerDTO {
   cep: string;
   pais?: string;
   codigoPais?: string;
+  observacoes?: string | null;
   limiteCredito?: string | null;
   bloqueado?: boolean;
 }

@@ -43,8 +43,11 @@ export interface Customer {
   cep: string;
   logradouro: string;
   numero: string;
+  complemento?: string | null;
+  pontoReferencia?: string | null;
   bairro: string;
   codigoMunicipioIbge: string;
+  observacoes?: string | null;
 }
 
 export interface Product {

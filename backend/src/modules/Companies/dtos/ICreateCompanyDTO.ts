@@ -21,6 +21,7 @@ export interface ICreateCompanyDTO {
   cep: string;
   telefone?: string | null;
   email?: string | null;
+  logo?: string | null;
 
   ambienteSefaz?: AmbienteSefaz;
   ambienteFocusNfe?: AmbienteSefaz;

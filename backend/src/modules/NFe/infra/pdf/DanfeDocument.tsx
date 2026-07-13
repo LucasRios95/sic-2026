@@ -100,6 +100,8 @@ const styles = StyleSheet.create({
   // Bloco emitente
   emitNome: { fontSize: 11, fontWeight: 'bold' },
   emitLine: { fontSize: 7, marginTop: 1 },
+  // Logo da empresa (canto superior esquerdo do bloco do emitente)
+  emitLogo: { width: 48, height: 48, marginRight: 6, objectFit: 'contain' },
   danfeTitle: { fontSize: 13, fontWeight: 'bold', textAlign: 'center' },
   danfeSubtitle: { fontSize: 7, textAlign: 'center', marginBottom: 2 },
   danfeBadge: {
@@ -246,6 +248,8 @@ export interface DanfeProps {
    * false = normal. Do cadastro do destinatário (preview) ou do XML (DANFE autorizado).
    */
   consumidorFinal?: boolean;
+  /** Dados de transporte (transportadora/veículo/volumes) para o quadro do DANFE. */
+  transporte?: DanfeTransporte;
 }
 
 export function DanfeDocument({
@@ -364,27 +368,34 @@ export function DanfeDocument({
               style={[
                 styles.colBorderRight,
                 styles.field,
+                styles.row,
                 { width: '40%', minHeight: 110 },
               ]}
             >
-              <Text style={styles.emitNome}>{emitente.razaoSocial}</Text>
-              {emitente.nomeFantasia ? (
-                <Text style={styles.emitLine}>{emitente.nomeFantasia}</Text>
+              {/* Logo no canto superior esquerdo, quando configurado na empresa. */}
+              {emitente.logo ? (
+                <Image src={emitente.logo} style={styles.emitLogo} />
               ) : null}
-              <Text style={[styles.emitLine, { marginTop: 4 }]}>
-                {emitente.logradouro}, {emitente.numero}
-                {emitente.complemento ? ` - ${emitente.complemento}` : ''}
-              </Text>
-              <Text style={styles.emitLine}>
-                {emitente.bairro} - {emitente.municipio} / {emitente.uf}
-              </Text>
-              <Text style={styles.emitLine}>CEP {formatCep(emitente.cep)}</Text>
-              {emitente.telefone ? (
-                <Text style={styles.emitLine}>Fone: {emitente.telefone}</Text>
-              ) : null}
-              {emitente.email ? (
-                <Text style={styles.emitLine}>{emitente.email}</Text>
-              ) : null}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.emitNome}>{emitente.razaoSocial}</Text>
+                {emitente.nomeFantasia ? (
+                  <Text style={styles.emitLine}>{emitente.nomeFantasia}</Text>
+                ) : null}
+                <Text style={[styles.emitLine, { marginTop: 4 }]}>
+                  {emitente.logradouro}, {emitente.numero}
+                  {emitente.complemento ? ` - ${emitente.complemento}` : ''}
+                </Text>
+                <Text style={styles.emitLine}>
+                  {emitente.bairro} - {emitente.municipio} / {emitente.uf}
+                </Text>
+                <Text style={styles.emitLine}>CEP {formatCep(emitente.cep)}</Text>
+                {emitente.telefone ? (
+                  <Text style={styles.emitLine}>Fone: {emitente.telefone}</Text>
+                ) : null}
+                {emitente.email ? (
+                  <Text style={styles.emitLine}>{emitente.email}</Text>
+                ) : null}
+              </View>
             </View>
 
             {/* DANFE + Chave + Protocolo (centro) */}

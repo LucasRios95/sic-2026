@@ -121,6 +121,11 @@ export class EmitirNFeUseCase {
     const customer = await this.customerRepository.findById(request.companyId, request.customerId);
     if (!customer) throw new NotFoundError('Cliente não encontrado');
 
+    // Anexa ponto de referência e observações do cliente às informações complementares —
+    // fluem para o XML (infCpl) e para o quadro "Dados Adicionais" da DANFE. Feito aqui, antes
+    // de persistir/serializar, para que tanto a entidade quanto o buildNfeDocument peguem o valor.
+    request.infCpl = appendCustomerInfoToInfCpl(request.infCpl, customer);
+
     // 2a) Ajusta CFOPs conforme operação interestadual antes de validar. Se o produto tem
     //     CFOP padrão de saída 5102 e o cliente é de outra UF, o sistema troca para 6102
     //     automaticamente. Idem entradas 1↔2.
@@ -1119,6 +1124,27 @@ export function aplicarOverrideIcms<
     csosnIcms: simples ? codigo : null,
     aliqIcms: semIcmsProprio ? null : rule.aliqIcms,
   };
+}
+
+/**
+ * Anexa as informações adicionais do cliente (ponto de referência e observações) às
+ * informações complementares (infCpl) da NF-e. O complemento do endereço já vai no grupo
+ * de endereço (xCpl), então NÃO entra aqui. O resultado aparece no XML (tag infCpl) e no
+ * quadro "Dados Adicionais" da DANFE. Retorna undefined quando não há nada a informar.
+ */
+export function appendCustomerInfoToInfCpl(
+  infCpl: string | null | undefined,
+  customer: { pontoReferencia?: string | null; observacoes?: string | null },
+): string | undefined {
+  const parts: string[] = [];
+  const base = infCpl?.trim();
+  if (base) parts.push(base);
+  const ref = customer.pontoReferencia?.trim();
+  if (ref) parts.push(`Ponto de referência: ${ref}`);
+  const obs = customer.observacoes?.trim();
+  if (obs) parts.push(obs);
+  const result = parts.join(' | ');
+  return result.length > 0 ? result : undefined;
 }
 
 /**

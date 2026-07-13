@@ -101,8 +101,13 @@ export class Customer extends BaseEntity {
   @Column({ type: 'varchar', length: 20 })
   numero!: string;
 
+  /// Informações adicionais do endereço (apartamento, sala, bloco, etc.). Vai no XML como xCpl.
   @Column({ type: 'varchar', length: 100, nullable: true })
   complemento?: string | null;
+
+  /// Ponto de referência do endereço. Não tem campo próprio no XML — é anexado ao infCpl da NF-e.
+  @Column({ name: 'ponto_referencia', type: 'varchar', length: 150, nullable: true })
+  pontoReferencia?: string | null;
 
   @Column({ type: 'varchar', length: 100 })
   bairro!: string;
@@ -125,6 +130,10 @@ export class Customer extends BaseEntity {
   /// Código do país conforme tabela BACEN/SEFAZ; 1058 = Brasil
   @Column({ name: 'codigo_pais', type: 'varchar', length: 4, default: '1058' })
   codigoPais!: string;
+
+  /// Observações livres do cliente — anexadas às informações complementares (infCpl) da NF-e.
+  @Column({ type: 'text', nullable: true })
+  observacoes?: string | null;
 
   // --- Comercial ---
 

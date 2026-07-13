@@ -47,15 +47,18 @@ export interface CreateCustomerPayload {
   cnpjCpf: string;
   nomeRazao: string;
   indicadorIE: IndicadorIE;
-  email?: string;
+  email?: string | null;
   consumidorFinal?: boolean;
   logradouro: string;
   numero: string;
+  complemento?: string | null;
+  pontoReferencia?: string | null;
   bairro: string;
   codigoMunicipioIbge: string;
   municipio: string;
   uf: string;
   cep: string;
+  observacoes?: string | null;
 }
 
 export async function createCustomer(payload: CreateCustomerPayload): Promise<Customer> {

@@ -37,6 +37,14 @@ export const createCompanySchema = z.object({
     .pipe(z.string().regex(cepRegex, 'CEP deve ter 8 dígitos')),
   telefone: z.string().max(20).optional().nullable(),
   email: z.string().email().max(150).optional().nullable(),
+  // Logo em data URI de imagem (renderizado na DANFE). Aceita PNG/JPEG/GIF; limite ~1MB
+  // para não inflar o payload nem a coluna. String vazia/null limpa o logo.
+  logo: z
+    .string()
+    .max(1_400_000, 'Logo muito grande (máx. ~1MB)')
+    .regex(/^data:image\/(png|jpe?g|gif);base64,/, 'Logo deve ser uma imagem (PNG, JPEG ou GIF)')
+    .optional()
+    .nullable(),
 
   ambienteSefaz: z.nativeEnum(AmbienteSefaz).optional(),
   ambienteFocusNfe: z.nativeEnum(AmbienteSefaz).optional(),

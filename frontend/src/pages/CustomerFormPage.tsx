@@ -18,6 +18,7 @@ import { Card, CardContent } from '@/shared/components/ui/Card';
 import { Input } from '@/shared/components/ui/Input';
 import { Label } from '@/shared/components/ui/Label';
 import { Select } from '@/shared/components/ui/Select';
+import { Textarea } from '@/shared/components/ui/Textarea';
 import type { Customer, IndicadorIE, TipoPessoa } from '@/shared/types/fiscal';
 
 const LIST_PATH = '/cadastros/customers';
@@ -31,11 +32,14 @@ type FormState = {
   consumidorFinal: boolean;
   logradouro: string;
   numero: string;
+  complemento: string;
+  pontoReferencia: string;
   bairro: string;
   codigoMunicipioIbge: string;
   municipio: string;
   uf: string;
   cep: string;
+  observacoes: string;
 };
 
 const EMPTY_FORM: FormState = {
@@ -47,11 +51,14 @@ const EMPTY_FORM: FormState = {
   consumidorFinal: false,
   logradouro: '',
   numero: '',
+  complemento: '',
+  pontoReferencia: '',
   bairro: '',
   codigoMunicipioIbge: '',
   municipio: '',
   uf: '',
   cep: '',
+  observacoes: '',
 };
 
 function customerToForm(c: Customer): FormState {
@@ -64,11 +71,14 @@ function customerToForm(c: Customer): FormState {
     consumidorFinal: c.consumidorFinal,
     logradouro: c.logradouro,
     numero: c.numero,
+    complemento: c.complemento ?? '',
+    pontoReferencia: c.pontoReferencia ?? '',
     bairro: c.bairro,
     codigoMunicipioIbge: c.codigoMunicipioIbge,
     municipio: c.municipio,
     uf: c.uf,
     cep: c.cep,
+    observacoes: c.observacoes ?? '',
   };
 }
 
@@ -81,11 +91,14 @@ const FIELD_LABELS: Record<string, string> = {
   consumidorFinal: 'Consumidor final',
   logradouro: 'Logradouro',
   numero: 'Número',
+  complemento: 'Complemento',
+  pontoReferencia: 'Ponto de referência',
   bairro: 'Bairro',
   codigoMunicipioIbge: 'Cód. IBGE',
   municipio: 'Município',
   uf: 'UF',
   cep: 'CEP',
+  observacoes: 'Observações',
 };
 
 function formatValidationError(err: unknown): string {
@@ -105,12 +118,17 @@ function formatValidationError(err: unknown): string {
   return err.message;
 }
 
+/**
+ * Campos opcionais vazios viram `null` (não `undefined`): JSON.stringify descarta chaves
+ * undefined, então o backend nunca receberia o campo e um valor previamente salvo não
+ * seria limpo na edição. `null` é aceito pelo schema (todos são .nullable()) e zera a coluna.
+ */
 function sanitizePayload<T extends Record<string, unknown>>(payload: T): T {
-  const OPTIONAL_FIELDS = ['email', 'complemento'];
+  const OPTIONAL_FIELDS = ['email', 'complemento', 'pontoReferencia', 'observacoes'];
   const cleaned = { ...payload };
   for (const key of OPTIONAL_FIELDS) {
     if (cleaned[key] === '') {
-      (cleaned as Record<string, unknown>)[key] = undefined;
+      (cleaned as Record<string, unknown>)[key] = null;
     }
   }
   return cleaned;
@@ -282,6 +300,24 @@ export function CustomerFormPage(): React.ReactElement {
                 />
               </div>
               <div className="space-y-1">
+                <Label>Complemento</Label>
+                <Input
+                  value={form.complemento}
+                  placeholder="Apto 42, Sala 2, Bloco B…"
+                  maxLength={100}
+                  onChange={(e) => setForm({ ...form, complemento: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1 col-span-2">
+                <Label>Ponto de referência</Label>
+                <Input
+                  value={form.pontoReferencia}
+                  placeholder="Próximo ao mercado, em frente à praça…"
+                  maxLength={150}
+                  onChange={(e) => setForm({ ...form, pontoReferencia: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
                 <Label>Bairro</Label>
                 <Input
                   value={form.bairro}
@@ -339,6 +375,19 @@ export function CustomerFormPage(): React.ReactElement {
                   </button>
                 </div>
                 {cepError ? <p className="text-xs text-amber-700">{cepError}</p> : null}
+              </div>
+              <div className="col-span-2 space-y-1">
+                <Label>Observações</Label>
+                <Textarea
+                  value={form.observacoes}
+                  placeholder="Informações adicionais do cliente — aparecem nas Informações Complementares da NF-e."
+                  maxLength={1000}
+                  onChange={(e) => setForm({ ...form, observacoes: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Ponto de referência e observações são anexados às Informações Complementares
+                  da nota fiscal.
+                </p>
               </div>
               <div className="col-span-2">
                 <label className="flex items-center gap-2 text-sm">

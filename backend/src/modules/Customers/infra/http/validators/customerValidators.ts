@@ -15,6 +15,7 @@ const baseAddressFields = {
   logradouro: z.string().min(1).max(200),
   numero: z.string().min(1).max(20),
   complemento: z.string().max(100).optional().nullable(),
+  pontoReferencia: z.string().max(150).optional().nullable(),
   bairro: z.string().min(1).max(100),
   codigoMunicipioIbge: z.string().regex(ibgeRegex, 'Código IBGE deve ter 7 dígitos'),
   municipio: z.string().min(1).max(100),
@@ -42,6 +43,7 @@ export const createCustomerSchema = z.object({
   ...baseAddressFields,
   pais: z.string().max(60).optional(),
   codigoPais: z.string().length(4).optional(),
+  observacoes: z.string().max(1000).optional().nullable(),
   limiteCredito: z.string().regex(/^\d+(\.\d{1,2})?$/).optional().nullable(),
   bloqueado: z.boolean().optional(),
 });

@@ -34,6 +34,7 @@ export type CompanyFormState = {
   cep: string;
   telefone: string;
   email: string;
+  logo: string;
   ambienteSefaz: AmbienteSefaz;
   emiteNfe: boolean;
   emiteNfse: boolean;
@@ -63,6 +64,7 @@ export const COMPANY_FORM_INITIAL: CompanyFormState = {
   cep: '',
   telefone: '',
   email: '',
+  logo: '',
   ambienteSefaz: 'HOMOLOGACAO',
   emiteNfe: true,
   emiteNfse: false,
@@ -98,6 +100,7 @@ export function companyToFormState(c: Company): CompanyFormState {
     cep: c.cep,
     telefone: c.telefone ?? '',
     email: c.email ?? '',
+    logo: c.logo ?? '',
     ambienteSefaz: c.ambienteSefaz,
     emiteNfe: c.emiteNfe,
     emiteNfse: c.emiteNfse,
@@ -129,6 +132,7 @@ export function companyFormToPayload(form: CompanyFormState): CreateCompanyPaylo
     cep: form.cep.replace(/\D/g, ''),
     telefone: form.telefone || null,
     email: form.email || null,
+    logo: form.logo || null,
     ambienteSefaz: form.ambienteSefaz,
     emiteNfe: form.emiteNfe,
     emiteNfse: form.emiteNfse,
@@ -419,6 +423,18 @@ export function CompanyForm({ form, setField, disabled, cnpjDisabled }: CompanyF
         </div>
       </Section>
 
+      {/* Logo */}
+      <Section
+        title="Logo"
+        description="Aparece no canto superior esquerdo da DANFE. PNG ou JPEG, até 1MB."
+      >
+        <LogoField
+          value={form.logo}
+          onChange={(v) => setField('logo', v)}
+          disabled={disabled}
+        />
+      </Section>
+
       {/* Ambiente fiscal */}
       <Section
         title="Ambiente fiscal"
@@ -463,6 +479,82 @@ export function CompanyForm({ form, setField, disabled, cnpjDisabled }: CompanyF
         <ToggleRow label="FCP" description="Fundo de Combate à Pobreza da UF de destino." checked={form.usaFcp} onChange={(v) => setField('usaFcp', v)} disabled={disabled} />
         <ToggleRow label="ICMS desonerado" description="Para regimes com isenção/redução com desoneração." checked={form.usaIcmsDesonerado} onChange={(v) => setField('usaIcmsDesonerado', v)} disabled={disabled} />
       </Section>
+    </div>
+  );
+}
+
+/** Limite do logo alinhado ao validador do backend (~1MB de imagem). */
+const LOGO_MAX_BYTES = 1_000_000;
+const LOGO_ACCEPTED = ['image/png', 'image/jpeg', 'image/gif'];
+
+/**
+ * Campo de upload do logo: lê o arquivo como data URI (base64) e guarda no form —
+ * o mesmo formato que o backend persiste e que o react-pdf consome na DANFE. Sem
+ * upload binário separado; a imagem viaja no próprio payload da empresa.
+ */
+function LogoField({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  function handleFile(file: File | undefined): void {
+    if (!file) return;
+    if (!LOGO_ACCEPTED.includes(file.type)) {
+      toast.error('Formato inválido. Use PNG, JPEG ou GIF.');
+      return;
+    }
+    if (file.size > LOGO_MAX_BYTES) {
+      toast.error('Imagem muito grande (máx. 1MB).');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === 'string') onChange(result);
+    };
+    reader.onerror = () => toast.error('Falha ao ler a imagem.');
+    reader.readAsDataURL(file);
+  }
+
+  return (
+    <div className="flex items-start gap-4">
+      <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
+        {value ? (
+          <img src={value} alt="Logo da empresa" className="max-h-full max-w-full object-contain" />
+        ) : (
+          <span className="px-2 text-center text-xs text-muted-foreground">Sem logo</span>
+        )}
+      </div>
+      <div className="space-y-2">
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/gif"
+          disabled={disabled}
+          onChange={(e) => {
+            handleFile(e.target.files?.[0]);
+            e.target.value = '';
+          }}
+          className="block text-sm file:mr-3 file:rounded-md file:border file:border-input file:bg-muted file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-muted/80 disabled:opacity-50"
+        />
+        {value ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={disabled}
+            onClick={() => onChange('')}
+          >
+            Remover logo
+          </Button>
+        ) : null}
+        <p className="text-xs text-muted-foreground">
+          Recomendado: imagem quadrada ou horizontal, fundo transparente.
+        </p>
+      </div>
     </div>
   );
 }

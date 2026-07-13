@@ -88,6 +88,11 @@ export class Company extends BaseEntity {
   @Column({ type: 'varchar', length: 150, nullable: true })
   email?: string | null;
 
+  /// Logo da empresa em data URI (data:image/png;base64,...). Quando presente, é renderizado
+  /// no canto superior esquerdo da DANFE, ao lado da identificação do emitente.
+  @Column({ type: 'text', nullable: true })
+  logo?: string | null;
+
   // --- Configurações fiscais ---
 
   @Column({

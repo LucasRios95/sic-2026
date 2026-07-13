@@ -20,6 +20,8 @@ export interface Company {
   cep: string;
   telefone: string | null;
   email: string | null;
+  /** Data URI (data:image/...;base64,...) do logo, renderizado na DANFE. */
+  logo: string | null;
   ambienteSefaz: AmbienteSefaz;
   emiteNfe: boolean;
   emiteNfse: boolean;
@@ -58,6 +60,7 @@ export interface CreateCompanyPayload {
   cep: string;
   telefone?: string | null;
   email?: string | null;
+  logo?: string | null;
   ambienteSefaz?: AmbienteSefaz;
   emiteNfe?: boolean;
   emiteNfse?: boolean;

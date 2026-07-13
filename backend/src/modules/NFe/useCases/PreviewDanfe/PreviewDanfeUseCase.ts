@@ -17,7 +17,10 @@ import { renderChaveAcessoBarcode, renderConsultaQrCode } from '../../infra/pdf/
 import { DanfeDocument, type DanfeTransporte } from '../../infra/pdf/DanfeDocument';
 import { NFe } from '../../infra/typeorm/entities/NFe';
 import { NFeItem } from '../../infra/typeorm/entities/NFeItem';
-import { aplicarOverrideIcms } from '../EmitirNFe/EmitirNFeUseCase';
+import {
+  aplicarOverrideIcms,
+  appendCustomerInfoToInfCpl,
+} from '../EmitirNFe/EmitirNFeUseCase';
 
 /**
  * Gera um DANFE de PRÉ-VISUALIZAÇÃO (espelho) a partir dos dados que o faturista está
@@ -195,7 +198,7 @@ export class PreviewDanfeUseCase {
       valorIbs: t?.valorIbs ?? '0.00',
       valorCbs: t?.valorCbs ?? '0.00',
       valorIs: t?.valorIs ?? '0.00',
-      infCpl: request.infCpl ?? null,
+      infCpl: appendCustomerInfoToInfCpl(request.infCpl, customer) ?? null,
       infAdFisco: null,
       items,
     } as unknown as NFe & { items: NFeItem[] };
