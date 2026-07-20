@@ -19,6 +19,9 @@ export interface ListNFesFilter {
   search?: string;
   from?: string;
   to?: string;
+  /** Competência (mês/ano). Quando informada, o backend ignora from/to. */
+  ano?: number;
+  mes?: number;
   limit?: number;
   offset?: number;
 }

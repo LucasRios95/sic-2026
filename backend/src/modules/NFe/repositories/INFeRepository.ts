@@ -35,9 +35,19 @@ export interface ListNFesFilter {
   customerId?: string;
   from?: Date;
   to?: Date;
+  /** Competência (mês/ano) avaliada no horário de Brasília. Quando presente, tem
+   * precedência sobre `from`/`to`. Ex.: ano=2026, mes=7 → todas as notas de julho/2026. */
+  ano?: number;
+  mes?: number;
   search?: string;
   limit?: number;
   offset?: number;
+}
+
+/** Linha do relatório de NF-e emitidas — inclui o destinatário resolvido via join. */
+export interface NFeListRow extends NFe {
+  customerNome: string | null;
+  customerCnpjCpf: string | null;
 }
 
 /** Linha enxuta para exportação de XML em lote (não carrega o agregado inteiro). */
@@ -73,7 +83,7 @@ export interface INFeRepository {
     pagamentos: CreateNFePagamentoData[],
   ): Promise<NFe>;
   update(id: string, patch: Partial<NFe>): Promise<NFe>;
-  list(filter: ListNFesFilter): Promise<{ items: NFe[]; total: number }>;
+  list(filter: ListNFesFilter): Promise<{ items: NFeListRow[]; total: number }>;
   /**
    * Lista, para exportação em lote, as NF-e com XML disponível emitidas na competência
    * (ano/mês). O mês é avaliado no horário de Brasília (America/Sao_Paulo) para bater com

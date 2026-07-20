@@ -93,7 +93,13 @@ export interface NFeListItem {
   valorTotal: string;
   ufDestino: string | null;
   customerId: string | null;
+  /** Razão social/nome do destinatário, resolvido no backend via join. */
+  customerNome: string | null;
+  /** CNPJ/CPF do destinatário (só dígitos). */
+  customerCnpjCpf: string | null;
   naturezaOperacao: string;
+  /** Data/hora da autorização — usada para a janela legal de cancelamento (24h). */
+  dhAutorizacao: string | null;
 }
 
 export interface NFeItem {
@@ -128,7 +134,7 @@ export interface NFeEvent {
 
 export interface NFeFull extends NFeListItem {
   protocoloAutorizacao?: string | null;
-  dhAutorizacao?: string | null;
+  // dhAutorizacao é herdado de NFeListItem (string | null).
   ambiente: AmbienteSefaz;
   formaEmissao: string;
   valorProdutos: string;

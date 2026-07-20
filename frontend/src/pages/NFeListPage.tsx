@@ -1,18 +1,43 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useNavigate } from '@tanstack/react-router';
+import {
+  Ban,
+  Eye,
+  FileDown,
+  FileText,
+  RefreshCw,
+  Trash2,
+} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 
+import { listCertificates } from '@/features/certificates/certificates-api';
+import { getCustomer, listCustomers } from '@/features/customers/customers-api';
+import { env } from '@/env';
 import { NFeImportExportActions } from '@/features/nfe/NFeImportExportActions';
-import { listNFes } from '@/features/nfe/nfe-api';
+import {
+  cancelNFe,
+  deleteNFe,
+  downloadNFeXml,
+  generateDanfe,
+  listNFes,
+} from '@/features/nfe/nfe-api';
+import { PageContainer } from '@/shared/components/PageContainer';
+import { PageHeader } from '@/shared/components/PageHeader';
 import { Badge } from '@/shared/components/ui/Badge';
 import { Button } from '@/shared/components/ui/Button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/Card';
+import { Card } from '@/shared/components/ui/Card';
 import { Input } from '@/shared/components/ui/Input';
+import { Label } from '@/shared/components/ui/Label';
+import { Modal } from '@/shared/components/ui/Modal';
 import { Pagination } from '@/shared/components/ui/Pagination';
 import { Select } from '@/shared/components/ui/Select';
+import { SearchCombobox, type ComboboxOption } from '@/shared/components/ui/SearchCombobox';
+import { Textarea } from '@/shared/components/ui/Textarea';
+import { useDebounce } from '@/shared/hooks/useDebounce';
 import { usePagination } from '@/shared/hooks/usePagination';
 import { STATUS_LABEL, STATUS_STYLES } from '@/shared/types/fiscal';
-import type { DocumentStatus } from '@/shared/types/fiscal';
+import type { DocumentStatus, NFeListItem } from '@/shared/types/fiscal';
 
 const STATUSES: DocumentStatus[] = [
   'DRAFT',
@@ -22,130 +47,524 @@ const STATUSES: DocumentStatus[] = [
   'REJECTED',
   'DENIED',
   'CANCELLED',
+  'INUTILIZED',
 ];
 
 export function NFeListPage(): React.ReactElement {
   const [statusFilter, setStatusFilter] = useState<DocumentStatus | ''>('');
+  const [customerId, setCustomerId] = useState('');
   const [search, setSearch] = useState('');
+  const [competencia, setCompetencia] = useState(''); // 'YYYY-MM'
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const debouncedSearch = useDebounce(search, 300);
   const pagination = usePagination({ initialPageSize: 50 });
   const queryClient = useQueryClient();
 
   useEffect(() => {
     pagination.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, search]);
+  }, [statusFilter, customerId, debouncedSearch, competencia, fromDate, toDate]);
+
+  // Competência (mês/ano) tem precedência: quando preenchida, ignoramos o intervalo de datas.
+  const period = useMemo(() => {
+    if (competencia) {
+      const [ano, mes] = competencia.split('-').map(Number);
+      return { ano, mes };
+    }
+    return {
+      from: fromDate ? new Date(`${fromDate}T00:00:00`).toISOString() : undefined,
+      to: toDate ? new Date(`${toDate}T23:59:59`).toISOString() : undefined,
+    };
+  }, [competencia, fromDate, toDate]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['nfe', statusFilter, search, pagination.page, pagination.pageSize],
+    queryKey: [
+      'nfe',
+      statusFilter,
+      customerId,
+      debouncedSearch,
+      period,
+      pagination.page,
+      pagination.pageSize,
+    ],
     queryFn: () =>
       listNFes({
         status: statusFilter || undefined,
-        search: search || undefined,
+        customerId: customerId || undefined,
+        search: debouncedSearch || undefined,
+        ...period,
         limit: pagination.pageSize,
         offset: pagination.offset,
       }),
     placeholderData: (prev) => prev,
   });
 
-  return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-6xl mx-auto">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">NF-e emitidas</h1>
-          <p className="text-muted-foreground">
-            Notas Fiscais Eletrônicas modelo 55 da empresa selecionada.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <NFeImportExportActions
-            onImported={() => queryClient.invalidateQueries({ queryKey: ['nfe'] })}
-          />
-          <Link to="/fiscal/nfe/inutilizar">
-            <Button variant="outline">Inutilizar faixa</Button>
-          </Link>
-          <Link to="/fiscal/nfe/new" search={{ reissueFrom: undefined }}>
-            <Button>Emitir nova NF-e</Button>
-          </Link>
-        </div>
-      </header>
+  const items = data?.items ?? [];
 
-      <div className="flex gap-3">
-        <Input
-          className="max-w-md"
-          placeholder="Buscar por chave ou número…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <Select
-          className="max-w-xs"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as DocumentStatus | '')}
-        >
-          <option value="">Todos os status</option>
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {STATUS_LABEL[s]}
-            </option>
-          ))}
-        </Select>
+  return (
+    <PageContainer maxWidth="wide">
+      <PageHeader
+        title="Relatório de NF-e emitidas"
+        description="Notas Fiscais Eletrônicas modelo 55 da empresa selecionada. Filtre, baixe, cancele ou reemita."
+        actions={
+          <>
+            <NFeImportExportActions
+              onImported={() => queryClient.invalidateQueries({ queryKey: ['nfe'] })}
+            />
+            <Link to="/fiscal/nfe/inutilizar">
+              <Button variant="outline">Inutilizar faixa</Button>
+            </Link>
+            <Link to="/fiscal/nfe/new" search={{ reissueFrom: undefined }}>
+              <Button>Emitir nova NF-e</Button>
+            </Link>
+          </>
+        }
+      />
+
+      {/* === Filtros === */}
+      <Card className="border-0 p-4">
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Buscar</Label>
+            <Input
+              placeholder="Chave, número, cliente ou CNPJ…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Situação</Label>
+            <Select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as DocumentStatus | '')}
+            >
+              <option value="">Todas as situações</option>
+              {STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {STATUS_LABEL[s]}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Cliente</Label>
+            <SearchCombobox
+              value={customerId}
+              onChange={setCustomerId}
+              placeholder="Todos os clientes"
+              emptyHint="Nenhum cliente"
+              fetchOptions={async (term) => {
+                const { items } = await listCustomers({ search: term || undefined, limit: 20 });
+                return items.map(
+                  (c): ComboboxOption => ({
+                    value: c.id,
+                    label: c.nomeRazao,
+                    render: (
+                      <div className="flex flex-col">
+                        <span className="font-medium">{c.nomeRazao}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatDoc(c.cnpjCpf)}
+                        </span>
+                      </div>
+                    ),
+                  }),
+                );
+              }}
+              loadSelected={async (id) => {
+                const c = await getCustomer(id);
+                return { value: c.id, label: c.nomeRazao };
+              }}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Competência</Label>
+            <Input
+              type="month"
+              value={competencia}
+              onChange={(e) => setCompetencia(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Emissão de</Label>
+            <Input
+              type="date"
+              value={fromDate}
+              disabled={Boolean(competencia)}
+              onChange={(e) => setFromDate(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Emissão até</Label>
+            <Input
+              type="date"
+              value={toDate}
+              disabled={Boolean(competencia)}
+              onChange={(e) => setToDate(e.target.value)}
+            />
+          </div>
+        </div>
+        {competencia ? (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Filtrando pela competência {competencia.split('-').reverse().join('/')}. Limpe o
+            campo para usar o intervalo de datas.
+          </p>
+        ) : null}
+      </Card>
+
+      {/* === Tabela === */}
+      <NFeReportTable
+        items={items}
+        total={data?.total ?? 0}
+        isLoading={isLoading}
+        pagination={pagination}
+        onChanged={() => queryClient.invalidateQueries({ queryKey: ['nfe'] })}
+      />
+    </PageContainer>
+  );
+}
+
+function NFeReportTable({
+  items,
+  total,
+  isLoading,
+  pagination,
+  onChanged,
+}: {
+  items: NFeListItem[];
+  total: number;
+  isLoading: boolean;
+  pagination: ReturnType<typeof usePagination>;
+  onChanged: () => void;
+}): React.ReactElement {
+  const navigate = useNavigate();
+  const [cancelTarget, setCancelTarget] = useState<NFeListItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<NFeListItem | null>(null);
+  const [certRef, setCertRef] = useState('');
+  const [cancelJust, setCancelJust] = useState('');
+
+  const { data: certificates } = useQuery({
+    queryKey: ['certificates'],
+    queryFn: listCertificates,
+  });
+
+  const xmlMutation = useMutation({
+    mutationFn: (id: string) => downloadNFeXml(id),
+    onError: () => toast.error('Falha ao baixar XML.'),
+  });
+
+  const danfeMutation = useMutation({
+    mutationFn: (id: string) => generateDanfe(id),
+    onSuccess: (result) => window.open(`${env.apiBaseUrl}${result.signedUrl}`, '_blank'),
+    onError: () => toast.error('Falha ao gerar DANFE.'),
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: () =>
+      cancelNFe(cancelTarget!.id, { justificativa: cancelJust, certificateVaultRef: certRef }),
+    onSuccess: () => {
+      toast.success('NF-e cancelada.');
+      resetCancel();
+      onChanged();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Falha ao cancelar.'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteNFe(deleteTarget!.id),
+    onSuccess: () => {
+      toast.success('NF-e excluída.');
+      setDeleteTarget(null);
+      onChanged();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Falha ao excluir.'),
+  });
+
+  function resetCancel(): void {
+    setCancelTarget(null);
+    setCancelJust('');
+    setCertRef('');
+  }
+
+  return (
+    <Card className="border-0 overflow-hidden">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <h2 className="text-sm font-semibold text-foreground">
+          {isLoading ? 'Carregando…' : `${total} NF-e`}
+        </h2>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            {isLoading ? 'Carregando…' : `${data?.total ?? 0} NF-e`}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {data?.items?.length === 0 ? (
-            <p className="text-muted-foreground">
-              Nenhuma NF-e encontrada com os filtros atuais.
+      {items.length === 0 && !isLoading ? (
+        <div className="p-10 text-center text-sm text-muted-foreground">
+          Nenhuma NF-e encontrada com os filtros atuais.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50">
+              <tr>
+                <Th>Código</Th>
+                <Th>Emissão</Th>
+                <Th>Razão social</Th>
+                <Th>CNPJ/CPF</Th>
+                <Th className="text-right">Valor</Th>
+                <Th>Situação</Th>
+                <Th className="text-right">Ações</Th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {items.map((nfe) => {
+                const flags = rowActions(nfe);
+                return (
+                  <tr key={nfe.id} className="hover:bg-muted/30">
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="font-medium">{String(nfe.numero).padStart(9, '0')}</div>
+                      <div className="text-xs text-muted-foreground">Série {nfe.serie}</div>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-foreground">
+                      {new Date(nfe.dhEmissao).toLocaleDateString('pt-BR')}
+                    </td>
+                    <td className="px-4 py-3 max-w-[16rem] truncate" title={nfe.customerNome ?? ''}>
+                      {nfe.customerNome ?? '—'}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap font-mono text-xs">
+                      {formatDoc(nfe.customerCnpjCpf)}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-right font-medium">
+                      {formatBRL(nfe.valorTotal)}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <Badge className={STATUS_STYLES[nfe.status]}>
+                        {STATUS_LABEL[nfe.status]}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <IconButton
+                          title="Abrir detalhes"
+                          onClick={() =>
+                            navigate({ to: '/fiscal/nfe/$id', params: { id: nfe.id } })
+                          }
+                        >
+                          <Eye className="h-4 w-4" />
+                        </IconButton>
+                        {flags.isAuthorized ? (
+                          <IconButton
+                            title="Baixar DANFE (PDF)"
+                            loading={danfeMutation.isPending && danfeMutation.variables === nfe.id}
+                            onClick={() => danfeMutation.mutate(nfe.id)}
+                          >
+                            <FileText className="h-4 w-4" />
+                          </IconButton>
+                        ) : null}
+                        {flags.canDownloadXml ? (
+                          <IconButton
+                            title="Baixar XML"
+                            loading={xmlMutation.isPending && xmlMutation.variables === nfe.id}
+                            onClick={() => xmlMutation.mutate(nfe.id)}
+                          >
+                            <FileDown className="h-4 w-4" />
+                          </IconButton>
+                        ) : null}
+                        {flags.canCancel ? (
+                          <IconButton
+                            title="Cancelar NF-e"
+                            variant="destructive"
+                            onClick={() => setCancelTarget(nfe)}
+                          >
+                            <Ban className="h-4 w-4" />
+                          </IconButton>
+                        ) : null}
+                        {flags.canReissue ? (
+                          <IconButton
+                            title="Reemitir (nota não autorizada)"
+                            onClick={() =>
+                              navigate({ to: '/fiscal/nfe/new', search: { reissueFrom: nfe.id } })
+                            }
+                          >
+                            <RefreshCw className="h-4 w-4" />
+                          </IconButton>
+                        ) : null}
+                        {flags.canDelete ? (
+                          <IconButton
+                            title="Excluir do sistema (libera a numeração)"
+                            variant="destructive"
+                            onClick={() => setDeleteTarget(nfe)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </IconButton>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="px-4 pb-3">
+        <Pagination
+          total={total}
+          page={pagination.page}
+          pageSize={pagination.pageSize}
+          onPageChange={pagination.setPage}
+          onPageSizeChange={pagination.setPageSize}
+          isLoading={isLoading}
+          className="pt-2"
+        />
+      </div>
+
+      {/* === Modal: Cancelar === */}
+      <Modal
+        open={cancelTarget !== null}
+        title="Cancelar NF-e"
+        description="Ação irreversível. Disponível por até 24h após a autorização."
+        onClose={resetCancel}
+        onConfirm={() => cancelMutation.mutate()}
+        confirmLabel="Confirmar cancelamento"
+        destructive
+        loading={cancelMutation.isPending}
+      >
+        <div className="space-y-3">
+          {cancelTarget ? (
+            <p className="text-sm text-muted-foreground">
+              NF-e nº <strong>{String(cancelTarget.numero).padStart(9, '0')}</strong> · Série{' '}
+              {cancelTarget.serie} · {cancelTarget.customerNome ?? '—'}
             </p>
           ) : null}
-          {data?.items?.map((nfe) => (
-            <Link
-              key={nfe.id}
-              to="/fiscal/nfe/$id"
-              params={{ id: nfe.id }}
-              className="block border-b border-border py-3 last:border-0 hover:bg-muted/40 -mx-6 px-6"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium">
-                    Nº {String(nfe.numero).padStart(9, '0')} · Série {nfe.serie}
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    {nfe.naturezaOperacao} · {new Date(nfe.dhEmissao).toLocaleString('pt-BR')}
-                  </div>
-                  {nfe.chaveAcesso ? (
-                    <div className="text-xs font-mono text-muted-foreground">
-                      {nfe.chaveAcesso}
-                    </div>
-                  ) : null}
-                </div>
-                <div className="text-right space-y-1">
-                  <Badge className={STATUS_STYLES[nfe.status]}>
-                    {STATUS_LABEL[nfe.status]}
-                  </Badge>
-                  <div className="text-sm font-medium">R$ {nfe.valorTotal}</div>
-                  {nfe.cStat ? (
-                    <div className="text-xs text-muted-foreground">cStat {nfe.cStat}</div>
-                  ) : null}
-                </div>
-              </div>
-            </Link>
-          ))}
-          <Pagination
-            total={data?.total ?? 0}
-            page={pagination.page}
-            pageSize={pagination.pageSize}
-            onPageChange={pagination.setPage}
-            onPageSizeChange={pagination.setPageSize}
-            isLoading={isLoading}
-            className="pt-2"
-          />
-        </CardContent>
-      </Card>
-    </div>
+          <div>
+            <Label>Certificado para assinar</Label>
+            <Select value={certRef} onChange={(e) => setCertRef(e.target.value)}>
+              <option value="">Selecione…</option>
+              {certificates
+                ?.filter((c) => c.active)
+                .map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.alias}
+                  </option>
+                ))}
+            </Select>
+          </div>
+          <div>
+            <Label>Justificativa (mínimo 15 caracteres)</Label>
+            <Textarea
+              value={cancelJust}
+              onChange={(e) => setCancelJust(e.target.value)}
+              placeholder="Ex.: Erro de digitação no nome do destinatário."
+            />
+            <p className="text-xs text-muted-foreground">{cancelJust.length}/15+</p>
+          </div>
+        </div>
+      </Modal>
+
+      {/* === Modal: Excluir === */}
+      <Modal
+        open={deleteTarget !== null}
+        title="Excluir NF-e do sistema"
+        description="Disponível apenas para notas que nunca foram autorizadas na SEFAZ. Libera a numeração para reuso."
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteMutation.mutate()}
+        confirmLabel="Confirmar exclusão"
+        destructive
+        loading={deleteMutation.isPending}
+      >
+        {deleteTarget ? (
+          <p className="text-sm">
+            NF-e nº <strong>{String(deleteTarget.numero).padStart(9, '0')}</strong>, série{' '}
+            <strong>{deleteTarget.serie}</strong> — situação{' '}
+            <Badge className={STATUS_STYLES[deleteTarget.status]}>
+              {STATUS_LABEL[deleteTarget.status]}
+            </Badge>
+          </p>
+        ) : null}
+      </Modal>
+    </Card>
   );
+}
+
+interface RowFlags {
+  isAuthorized: boolean;
+  canCancel: boolean;
+  canReissue: boolean;
+  canDelete: boolean;
+  canDownloadXml: boolean;
+}
+
+/** Espelha a lógica de disponibilidade de ações do NFeDetailsPage. */
+function rowActions(nfe: NFeListItem): RowFlags {
+  const isAuthorized = nfe.status === 'AUTHORIZED';
+  const hoursSinceAuth = nfe.dhAutorizacao
+    ? (Date.now() - new Date(nfe.dhAutorizacao).getTime()) / 3_600_000
+    : Infinity;
+  return {
+    isAuthorized,
+    canCancel: isAuthorized && hoursSinceAuth <= 24,
+    canReissue: ['REJECTED', 'PENDING', 'DENIED'].includes(nfe.status),
+    canDelete: ['DRAFT', 'PENDING', 'SUBMITTED', 'REJECTED', 'ERROR'].includes(nfe.status),
+    canDownloadXml: ['AUTHORIZED', 'REJECTED', 'DENIED', 'SUBMITTED', 'PROCESSING'].includes(
+      nfe.status,
+    ),
+  };
+}
+
+function Th({
+  children,
+  className = '',
+}: {
+  children: React.ReactNode;
+  className?: string;
+}): React.ReactElement {
+  return (
+    <th
+      className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground ${className}`}
+    >
+      {children}
+    </th>
+  );
+}
+
+function IconButton({
+  children,
+  title,
+  onClick,
+  loading,
+  variant = 'ghost',
+}: {
+  children: React.ReactNode;
+  title: string;
+  onClick: () => void;
+  loading?: boolean;
+  variant?: 'ghost' | 'destructive';
+}): React.ReactElement {
+  return (
+    <Button
+      variant={variant}
+      size="icon"
+      className="h-8 w-8"
+      title={title}
+      aria-label={title}
+      loading={loading}
+      onClick={onClick}
+    >
+      {children}
+    </Button>
+  );
+}
+
+/** Formata CNPJ (14 díg.) ou CPF (11 díg.); devolve o valor cru se não bater. */
+function formatDoc(doc: string | null): string {
+  if (!doc) return '—';
+  const d = doc.replace(/\D/g, '');
+  if (d.length === 14) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  if (d.length === 11) return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
+  return doc;
+}
+
+function formatBRL(value: string): string {
+  const n = Number(value);
+  return Number.isNaN(n)
+    ? `R$ ${value}`
+    : n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }

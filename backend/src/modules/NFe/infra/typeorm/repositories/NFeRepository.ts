@@ -1,4 +1,4 @@
-import { Between, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
 import { appDataSource } from '@shared/infra/typeorm/data-source';
 
@@ -8,6 +8,7 @@ import {
   CreateNFePagamentoData,
   INFeRepository,
   ListNFesFilter,
+  NFeListRow,
   NFeXmlExportRow,
 } from '../../../repositories/INFeRepository';
 import { NFe } from '../entities/NFe';
@@ -98,28 +99,54 @@ export class NFeRepository implements INFeRepository {
     await this.repo.delete({ id });
   }
 
-  async list(filter: ListNFesFilter): Promise<{ items: NFe[]; total: number }> {
-    const { companyId, status, customerId, from, to, search, limit = 50, offset = 0 } = filter;
-    const where: Record<string, unknown> = { companyId };
-    if (status) where.status = status;
-    if (customerId) where.customerId = customerId;
-    if (from && to) where.dhEmissao = Between(from, to);
-    else if (from) where.dhEmissao = MoreThanOrEqual(from);
-    else if (to) where.dhEmissao = LessThanOrEqual(to);
+  async list(filter: ListNFesFilter): Promise<{ items: NFeListRow[]; total: number }> {
+    const { companyId, status, customerId, from, to, ano, mes, search, limit = 50, offset = 0 } =
+      filter;
 
+    // leftJoinAndSelect do destinatário: o relatório precisa da razão social + CNPJ/CPF.
+    // É LEFT porque customer_id é nullable (ex.: NFC-e / rascunho sem cliente).
     const qb = this.repo
       .createQueryBuilder('n')
-      .where(where);
+      .leftJoinAndSelect('n.customer', 'customer')
+      .where('n.company_id = :companyId', { companyId });
+
+    if (status) qb.andWhere('n.status = :status', { status });
+    if (customerId) qb.andWhere('n.customer_id = :customerId', { customerId });
+
+    // Competência (mês/ano) tem precedência sobre from/to. Avaliada em horário de Brasília
+    // (mesmo critério do listXmlByPeriodo) pra bater com a data que aparece na nota.
+    if (ano && mes) {
+      qb.andWhere(
+        "(n.dh_emissao AT TIME ZONE 'America/Sao_Paulo') >= make_date(:ano, :mes, 1)",
+        { ano, mes },
+      ).andWhere(
+        "(n.dh_emissao AT TIME ZONE 'America/Sao_Paulo') < (make_date(:ano, :mes, 1) + interval '1 month')",
+      );
+    } else if (from && to) {
+      qb.andWhere('n.dh_emissao BETWEEN :from AND :to', { from, to });
+    } else if (from) {
+      qb.andWhere('n.dh_emissao >= :from', { from });
+    } else if (to) {
+      qb.andWhere('n.dh_emissao <= :to', { to });
+    }
+
     if (search) {
       qb.andWhere(
-        '(n.chave_acesso ILIKE :term OR CAST(n.numero AS text) ILIKE :term)',
+        '(n.chave_acesso ILIKE :term OR CAST(n.numero AS text) ILIKE :term OR customer.nome_razao ILIKE :term OR customer.cnpj_cpf ILIKE :term)',
         { term: `%${search}%` },
       );
     }
     qb.orderBy('n.dh_emissao', 'DESC').limit(limit).offset(offset);
 
     const [items, total] = await qb.getManyAndCount();
-    return { items, total };
+    // Achata o destinatário nas colunas do relatório; mantém o restante do agregado intacto.
+    const rows: NFeListRow[] = items.map((nfe) =>
+      Object.assign(nfe, {
+        customerNome: nfe.customer?.nomeRazao ?? null,
+        customerCnpjCpf: nfe.customer?.cnpjCpf ?? null,
+      }),
+    );
+    return { items: rows, total };
   }
 
   async listXmlByPeriodo(

@@ -166,6 +166,9 @@ export const listNFesQuerySchema = z.object({
   search: z.string().optional(),
   from: z.string().datetime({ offset: true }).optional(),
   to: z.string().datetime({ offset: true }).optional(),
+  // Competência (mês/ano). Quando presente, tem precedência sobre from/to no repositório.
+  ano: z.coerce.number().int().min(2006).max(2100).optional(),
+  mes: z.coerce.number().int().min(1).max(12).optional(),
   limit: z.coerce.number().int().positive().max(200).optional(),
   offset: z.coerce.number().int().nonnegative().optional(),
 });
