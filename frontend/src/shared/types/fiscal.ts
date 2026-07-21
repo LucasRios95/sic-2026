@@ -36,6 +36,8 @@ export interface Customer {
   cnpjCpf: string;
   nomeRazao: string;
   email?: string | null;
+  /// Inscrição Estadual — obrigatória para destinatário contribuinte de ICMS (vai como <IE> na NF-e).
+  ie?: string | null;
   indicadorIE: IndicadorIE;
   consumidorFinal: boolean;
   uf: string;

@@ -47,6 +47,7 @@ export interface CreateCustomerPayload {
   cnpjCpf: string;
   nomeRazao: string;
   indicadorIE: IndicadorIE;
+  ie?: string | null;
   email?: string | null;
   consumidorFinal?: boolean;
   logradouro: string;

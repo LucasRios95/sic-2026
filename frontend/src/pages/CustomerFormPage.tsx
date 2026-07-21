@@ -28,6 +28,7 @@ type FormState = {
   cnpjCpf: string;
   nomeRazao: string;
   indicadorIE: IndicadorIE;
+  ie: string;
   email: string;
   consumidorFinal: boolean;
   logradouro: string;
@@ -47,6 +48,7 @@ const EMPTY_FORM: FormState = {
   cnpjCpf: '',
   nomeRazao: '',
   indicadorIE: 'CONTRIBUINTE',
+  ie: '',
   email: '',
   consumidorFinal: false,
   logradouro: '',
@@ -67,6 +69,7 @@ function customerToForm(c: Customer): FormState {
     cnpjCpf: c.cnpjCpf,
     nomeRazao: c.nomeRazao,
     indicadorIE: c.indicadorIE,
+    ie: c.ie ?? '',
     email: c.email ?? '',
     consumidorFinal: c.consumidorFinal,
     logradouro: c.logradouro,
@@ -87,6 +90,7 @@ const FIELD_LABELS: Record<string, string> = {
   cnpjCpf: 'CNPJ/CPF',
   nomeRazao: 'Razão social / Nome',
   indicadorIE: 'Indicador IE',
+  ie: 'Inscrição Estadual',
   email: 'E-mail',
   consumidorFinal: 'Consumidor final',
   logradouro: 'Logradouro',
@@ -124,7 +128,7 @@ function formatValidationError(err: unknown): string {
  * seria limpo na edição. `null` é aceito pelo schema (todos são .nullable()) e zera a coluna.
  */
 function sanitizePayload<T extends Record<string, unknown>>(payload: T): T {
-  const OPTIONAL_FIELDS = ['email', 'complemento', 'pontoReferencia', 'observacoes'];
+  const OPTIONAL_FIELDS = ['ie', 'email', 'complemento', 'pontoReferencia', 'observacoes'];
   const cleaned = { ...payload };
   for (const key of OPTIONAL_FIELDS) {
     if (cleaned[key] === '') {
@@ -209,13 +213,17 @@ export function CustomerFormPage(): React.ReactElement {
 
   function submitForm(e: React.FormEvent): void {
     e.preventDefault();
+    // A IE só faz sentido (e só vai ao XML) para destinatário contribuinte. Em qualquer
+    // outro indicador, zera para não enviar valor obsoleto que fica ao trocar o seletor.
+    const normalized: FormState =
+      form.indicadorIE === 'CONTRIBUINTE' ? form : { ...form, ie: '' };
     if (editingId) {
-      const { tipoPessoa: _t, cnpjCpf: _d, ...rest } = form;
+      const { tipoPessoa: _t, cnpjCpf: _d, ...rest } = normalized;
       void _t;
       void _d;
       updateMutation.mutate({ id: editingId, payload: sanitizePayload(rest) });
     } else {
-      createMutation.mutate(sanitizePayload(form));
+      createMutation.mutate(sanitizePayload(normalized));
     }
   }
 
@@ -281,6 +289,22 @@ export function CustomerFormPage(): React.ReactElement {
                   <option value="NAO_CONTRIBUINTE">Não contribuinte</option>
                 </Select>
               </div>
+              {form.indicadorIE === 'CONTRIBUINTE' ? (
+                <div className="space-y-1">
+                  <Label>Inscrição Estadual</Label>
+                  <Input
+                    value={form.ie}
+                    placeholder="Somente números"
+                    maxLength={20}
+                    onChange={(e) =>
+                      setForm({ ...form, ie: e.target.value.replace(/\D/g, '').slice(0, 20) })
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Obrigatória para contribuinte de ICMS — transmitida como &lt;IE&gt; na NF-e.
+                  </p>
+                </div>
+              ) : null}
               <div className="space-y-1">
                 <Label>E-mail</Label>
                 <Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
