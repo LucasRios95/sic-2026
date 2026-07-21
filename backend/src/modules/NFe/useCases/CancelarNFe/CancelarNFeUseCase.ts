@@ -127,8 +127,10 @@ export class CancelarNFeUseCase {
     });
 
     // Persiste evento como PENDING ANTES de chamar SEFAZ — assim, se cair no meio,
-    // temos rastro do que foi tentado.
-    const eventoRecord = await this.eventoRepository.create({
+    // temos rastro do que foi tentado. `createOrReplace` reaproveita a linha de uma
+    // tentativa anterior (cancelamento rejeitado pode ser retransmitido): sem isso, a
+    // 2ª tentativa violaria o índice único uq_nfe_eventos_scope e retornaria erro 500.
+    const eventoRecord = await this.eventoRepository.createOrReplace({
       nfeId: nfe.id,
       tipoEvento: TipoEventoNFe.CANCELAMENTO,
       sequencial: 1,

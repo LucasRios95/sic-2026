@@ -67,6 +67,7 @@ function setup(initialNFe: NFe) {
   };
   const eventoRepo: INFeEventoRepository = {
     create: vi.fn(async (data) => ({ id: 'evt-1', ...data } as NFeEvento)),
+    createOrReplace: vi.fn(async (data) => ({ id: 'evt-1', ...data } as NFeEvento)),
     update: vi.fn(async (id, patch) => ({ id, ...patch } as NFeEvento)),
     countByTipo: vi.fn(async () => 0),
     listByNFe: vi.fn(),
@@ -149,7 +150,7 @@ describe('CancelarNFeUseCase', () => {
     expect(result.cStat).toBe('135');
     expect(result.nfe.status).toBe(DocumentStatus.CANCELLED);
     expect(soap.call).toHaveBeenCalledOnce();
-    expect(eventoRepo.create).toHaveBeenCalledOnce();
+    expect(eventoRepo.createOrReplace).toHaveBeenCalledOnce();
     expect(nfeRepo.update).toHaveBeenCalled();
   });
 

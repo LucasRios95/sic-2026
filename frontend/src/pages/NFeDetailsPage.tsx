@@ -58,7 +58,19 @@ export function NFeDetailsPage(): React.ReactElement {
   const cancelMutation = useMutation({
     mutationFn: () =>
       cancelNFe(id, { justificativa: cancelJust, certificateVaultRef: certRef }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      // A SEFAZ pode rejeitar o cancelamento (HTTP 200, mas cStat ≠ 135/155): a nota
+      // continua autorizada. Só tratamos como sucesso quando o evento foi aceito; caso
+      // contrário, mantemos o modal aberto e mostramos o motivo da rejeição.
+      const aceito = result.cStat === '135' || result.cStat === '155';
+      if (!aceito) {
+        setActionError(
+          `Cancelamento rejeitado pela SEFAZ${result.cStat ? ` (cStat ${result.cStat})` : ''}: ` +
+            (result.xMotivo ?? 'motivo não informado'),
+        );
+        return;
+      }
+      setActionError(null);
       setCancelOpen(false);
       setCancelJust('');
       void queryClient.invalidateQueries({ queryKey: ['nfe', id] });
@@ -166,7 +178,10 @@ export function NFeDetailsPage(): React.ReactElement {
               </Button>
               <Button
                 variant="destructive"
-                onClick={() => setCancelOpen(true)}
+                onClick={() => {
+                  setActionError(null);
+                  setCancelOpen(true);
+                }}
                 disabled={!canCancel}
                 title={
                   canCancel
@@ -342,6 +357,9 @@ export function NFeDetailsPage(): React.ReactElement {
             />
             <p className="text-xs text-muted-foreground">{cancelJust.length}/15+</p>
           </div>
+          {actionError && cancelOpen ? (
+            <p className="text-sm text-destructive whitespace-pre-wrap">{actionError}</p>
+          ) : null}
         </div>
       </Modal>
 

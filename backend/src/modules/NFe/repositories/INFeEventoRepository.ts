@@ -22,6 +22,13 @@ export interface UpdateNFeEventoData {
 
 export interface INFeEventoRepository {
   create(data: CreateNFeEventoData): Promise<NFeEvento>;
+  /**
+   * Grava o evento reaproveitando a linha já existente em (nfeId, tipoEvento, sequencial)
+   * quando houver — reseta o estado de retorno da SEFAZ para uma nova tentativa. Evita a
+   * violação do índice único `uq_nfe_eventos_scope` ao retransmitir um evento (ex.: um
+   * cancelamento que a SEFAZ rejeitou e o usuário tenta de novo).
+   */
+  createOrReplace(data: CreateNFeEventoData): Promise<NFeEvento>;
   update(id: string, patch: UpdateNFeEventoData): Promise<NFeEvento>;
   countByTipo(nfeId: string, tipo: TipoEventoNFe): Promise<number>;
   listByNFe(nfeId: string): Promise<NFeEvento[]>;
