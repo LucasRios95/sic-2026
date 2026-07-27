@@ -46,6 +46,25 @@ describe('NFeEventoXmlBuilder.buildCancelamento', () => {
     expect(xml).toContain('<tpAmb>1</tpAmb>');
   });
 
+  it('dhEvento no padrão SEFAZ (sem "Z", sem milissegundos, com offset) — evita rejeição de schema', () => {
+    const { xml } = builder.buildCancelamento({
+      chaveAcesso: '35260611222333000181550010000000011000000017',
+      cnpjEmitente: '11222333000181',
+      ambiente: AmbienteSefaz.HOMOLOGACAO,
+      ufEmitente: 'SP',
+      // 2026-06-15T12:00:00Z (UTC) → 09:00:00-03:00 no fuso de SP.
+      dhEvento: new Date('2026-06-15T12:00:00.123Z'),
+      nSeqEvento: 1,
+      nProt: '135260012345678',
+      justificativa: 'Cancelamento por erro de digitação no destinatário',
+    });
+    expect(xml).toContain('<dhEvento>2026-06-15T09:00:00-03:00</dhEvento>');
+    // Regressão: o formato antigo (Date.toISOString) tinha "Z" e milissegundos e a SEFAZ
+    // rejeitava o evento por falha de schema, quebrando o cancelamento.
+    expect(xml).not.toMatch(/<dhEvento>[^<]*Z<\/dhEvento>/);
+    expect(xml).not.toMatch(/<dhEvento>[^<]*\.\d+/);
+  });
+
   it('Id muda conforme nSeqEvento (para CC-e futura — até 20 sequências)', () => {
     const base = {
       chaveAcesso: '35260611222333000181550010000000011000000017',

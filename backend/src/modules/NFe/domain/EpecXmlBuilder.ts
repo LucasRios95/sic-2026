@@ -3,6 +3,7 @@ import { create } from 'xmlbuilder2';
 import { AmbienteSefaz } from '@modules/Companies/infra/typeorm/entities/Company';
 
 import { TIPO_EVENTO_CODIGO, TipoEventoNFe } from './nfe-enums';
+import { formatSefazDateTime } from './sefaz-datetime';
 
 /**
  * Builder do Evento Prévio de Emissão em Contingência (EPEC) — tpEvento 110140.
@@ -71,7 +72,7 @@ export class EpecXmlBuilder {
     infEvento.ele('tpAmb').txt(input.ambiente === AmbienteSefaz.PRODUCAO ? '1' : '2').up();
     infEvento.ele('CNPJ').txt(input.cnpjEmitente.replace(/\D/g, '')).up();
     infEvento.ele('chNFe').txt(input.chaveAcesso).up();
-    infEvento.ele('dhEvento').txt(input.dhEvento.toISOString()).up();
+    infEvento.ele('dhEvento').txt(formatSefazDateTime(input.dhEvento)).up();
     infEvento.ele('tpEvento').txt(tpEvento).up();
     infEvento.ele('nSeqEvento').txt(String(nSeqEvento)).up();
     infEvento.ele('verEvento').txt('1.00').up();
@@ -81,7 +82,7 @@ export class EpecXmlBuilder {
     detEvento.ele('cOrgaoAutor').txt('91').up();
     detEvento.ele('tpAutor').txt('1').up(); // 1 = empresa emitente
     detEvento.ele('verAplic').txt('SIC2026').up();
-    detEvento.ele('dhEmi').txt(input.dhEvento.toISOString()).up();
+    detEvento.ele('dhEmi').txt(formatSefazDateTime(input.dhEvento)).up();
     detEvento.ele('tpNF').txt(String(input.tpNF)).up();
     detEvento.ele('IE').txt(input.ieEmitente).up();
 

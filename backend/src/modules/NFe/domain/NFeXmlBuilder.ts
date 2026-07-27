@@ -18,6 +18,7 @@ import {
   UF_CODIGO,
 } from './nfe-enums';
 import { NFeDocument, NFeEndereco, NFeItem } from './NFeDocument';
+import { formatSefazDateTime } from './sefaz-datetime';
 
 /**
  * Compositor do XML da NF-e modelo 55. Recebe um NFeDocument (estrutura pura do domínio,
@@ -627,28 +628,9 @@ function requiresIndIntermed(indPres: IndicadorPresenca | undefined): boolean {
   ].includes(indPres);
 }
 
-function toISO(d: Date): string {
-  // Schema NF-e 4.00 (TData) exige YYYY-MM-DDTHH:MM:SS±HH:MM — SEM milissegundos e
-  // SEM o sufixo "Z" do UTC. Date.toISOString() devolve "2026-05-28T12:03:53.098Z",
-  // o que dispara cStat 225 (Falha no Schema XML).
-  //
-  // Estratégia: serializa em horário do fuso de São Paulo (UTC−03:00) — Brasil não
-  // observa horário de verão desde 2019, então o offset é constante. Se a operação
-  // precisar de outro fuso (Acre etc.), trocar a constante; suporte multi-fuso fica
-  // para quando houver demanda de cliente.
-  const OFFSET_MIN = -180; // UTC−03:00
-  const local = new Date(d.getTime() + OFFSET_MIN * 60_000);
-  const yyyy = local.getUTCFullYear();
-  const mm = String(local.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(local.getUTCDate()).padStart(2, '0');
-  const hh = String(local.getUTCHours()).padStart(2, '0');
-  const mi = String(local.getUTCMinutes()).padStart(2, '0');
-  const ss = String(local.getUTCSeconds()).padStart(2, '0');
-  const sign = OFFSET_MIN <= 0 ? '-' : '+';
-  const offH = String(Math.floor(Math.abs(OFFSET_MIN) / 60)).padStart(2, '0');
-  const offM = String(Math.abs(OFFSET_MIN) % 60).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}${sign}${offH}:${offM}`;
-}
+// Formatação de dhEmi/dhSaiEnt no padrão da SEFAZ (sem ms, com offset) vive em
+// ./sefaz-datetime para ser reaproveitada pelos builders de evento.
+const toISO = formatSefazDateTime;
 
 /**
  * Mapeia o CSOSN para o nome do GRUPO no schema. O leiaute não tem um elemento por CSOSN —

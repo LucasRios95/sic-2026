@@ -3,6 +3,7 @@ import { create } from 'xmlbuilder2';
 import { AmbienteSefaz } from '@modules/Companies/infra/typeorm/entities/Company';
 
 import { TIPO_EVENTO_CODIGO, TipoEventoNFe, UF_CODIGO } from './nfe-enums';
+import { formatSefazDateTime } from './sefaz-datetime';
 
 /**
  * Builder do XML de eventos da NF-e (cancelamento, CC-e, manifestação, EPEC, etc.).
@@ -168,7 +169,7 @@ export class NFeEventoXmlBuilder {
     infEvento.ele('tpAmb').txt(input.ambiente === AmbienteSefaz.PRODUCAO ? '1' : '2').up();
     infEvento.ele('CNPJ').txt(input.cnpjEmitente.replace(/\D/g, '')).up();
     infEvento.ele('chNFe').txt(input.chaveAcesso).up();
-    infEvento.ele('dhEvento').txt(input.dhEvento.toISOString()).up();
+    infEvento.ele('dhEvento').txt(formatSefazDateTime(input.dhEvento)).up();
     infEvento.ele('tpEvento').txt(tpEvento).up();
     infEvento.ele('nSeqEvento').txt(String(input.nSeqEvento)).up();
     infEvento.ele('verEvento').txt(input.versaoEvento).up();
