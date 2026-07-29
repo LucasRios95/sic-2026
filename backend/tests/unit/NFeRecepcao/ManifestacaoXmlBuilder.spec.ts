@@ -119,6 +119,17 @@ describe('ManifestacaoXmlBuilder', () => {
     expect(xml).toContain('<verEvento>1.00</verEvento>');
   });
 
+  it('dhEvento no padrão SEFAZ (sem "Z"/milissegundos, com offset −03:00)', () => {
+    const { xml } = builder.build({
+      ...baseInput,
+      dhEvento: new Date('2026-05-20T12:00:00.987Z'), // 09:00 no fuso de SP
+      tipo: TipoManifestacao.CIENCIA_OPERACAO,
+    });
+    expect(xml).toContain('<dhEvento>2026-05-20T09:00:00-03:00</dhEvento>');
+    expect(xml).not.toMatch(/<dhEvento>[^<]*Z<\/dhEvento>/);
+    expect(xml).not.toMatch(/<dhEvento>[^<]*\.\d+/);
+  });
+
   it('limpa máscara de CNPJ no campo CNPJ do evento', () => {
     const { xml } = builder.build({
       ...baseInput,

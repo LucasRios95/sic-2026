@@ -48,6 +48,8 @@ export function NFeDetailsPage(): React.ReactElement {
   const [certRef, setCertRef] = useState('');
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelJust, setCancelJust] = useState('');
+  // Ciência do cancelamento extemporâneo (após 24h) — exigida antes de transmitir.
+  const [cancelForaPrazoOk, setCancelForaPrazoOk] = useState(false);
   const [cceOpen, setCceOpen] = useState(false);
   const [cceTexto, setCceTexto] = useState('');
   const [emailOpen, setEmailOpen] = useState(false);
@@ -57,7 +59,11 @@ export function NFeDetailsPage(): React.ReactElement {
 
   const cancelMutation = useMutation({
     mutationFn: () =>
-      cancelNFe(id, { justificativa: cancelJust, certificateVaultRef: certRef }),
+      cancelNFe(id, {
+        justificativa: cancelJust,
+        certificateVaultRef: certRef,
+        forcarForaPrazo: cancelForaPrazoOk,
+      }),
     onSuccess: (result) => {
       // A SEFAZ pode rejeitar o cancelamento (HTTP 200, mas cStat ≠ 135/155): a nota
       // continua autorizada. Só tratamos como sucesso quando o evento foi aceito; caso
@@ -73,6 +79,7 @@ export function NFeDetailsPage(): React.ReactElement {
       setActionError(null);
       setCancelOpen(false);
       setCancelJust('');
+      setCancelForaPrazoOk(false);
       void queryClient.invalidateQueries({ queryKey: ['nfe', id] });
     },
     onError: (e) => setActionError(formatActionError(e, 'Falha ao cancelar.')),
@@ -128,7 +135,10 @@ export function NFeDetailsPage(): React.ReactElement {
   const hoursSinceAuth = nfe.dhAutorizacao
     ? (Date.now() - new Date(nfe.dhAutorizacao).getTime()) / 3_600_000
     : Infinity;
-  const canCancel = isAuthorized && hoursSinceAuth <= 24;
+  // Cancelar fica sempre disponível para nota autorizada: passadas as 24h o pedido vira
+  // extemporâneo e quem homologa (cStat 155) ou rejeita é a SEFAZ da UF, não o sistema.
+  const canCancel = isAuthorized;
+  const cancelForaDoPrazo = isAuthorized && hoursSinceAuth > 24;
   // Reemissão: válida para NFe rejeitada ou que ficou pendente sem certificado
   // (PENDING). Para PROCESSING o caminho correto é esperar a reconciliação.
   const canReissue = nfe.status === 'REJECTED' || nfe.status === 'PENDING' || nfe.status === 'DENIED';
@@ -184,9 +194,9 @@ export function NFeDetailsPage(): React.ReactElement {
                 }}
                 disabled={!canCancel}
                 title={
-                  canCancel
-                    ? undefined
-                    : 'Prazo legal de 24h excedido — use CC-e ou nota de devolução'
+                  cancelForaDoPrazo
+                    ? 'Fora das 24h — cancelamento extemporâneo, sujeito à aceitação da SEFAZ'
+                    : undefined
                 }
               >
                 Cancelar
@@ -328,15 +338,43 @@ export function NFeDetailsPage(): React.ReactElement {
       {/* === Modal: Cancelar === */}
       <Modal
         open={cancelOpen}
-        title="Cancelar NF-e"
-        description="Ação irreversível. Disponível por até 24h após a autorização."
+        title={cancelForaDoPrazo ? 'Cancelar NF-e (fora do prazo)' : 'Cancelar NF-e'}
+        description={
+          cancelForaDoPrazo
+            ? 'Passadas as 24h da autorização, o cancelamento é extemporâneo: quem aceita ou recusa é a SEFAZ.'
+            : 'Ação irreversível. Prazo padrão de 24h após a autorização.'
+        }
         onClose={() => setCancelOpen(false)}
         onConfirm={() => cancelMutation.mutate()}
         confirmLabel="Confirmar cancelamento"
         destructive
         loading={cancelMutation.isPending}
+        confirmDisabled={cancelForaDoPrazo && !cancelForaPrazoOk}
       >
         <div className="space-y-3">
+          {cancelForaDoPrazo ? (
+            <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm space-y-2">
+              <p>
+                Autorizada há <strong>{formatHorasDesdeAutorizacao(hoursSinceAuth)}</strong> — fora
+                da janela padrão de 24h.
+              </p>
+              <p className="text-muted-foreground">
+                O evento será transmitido mesmo assim. A SEFAZ pode homologar fora do prazo
+                (cStat 155, sujeito a multa por obrigação acessória) ou rejeitar (ex.: cStat 501,
+                prazo superior ao previsto na legislação da UF). Se rejeitar, a nota continua
+                autorizada e o caminho é emitir uma nota de devolução.
+              </p>
+              <label className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-border"
+                  checked={cancelForaPrazoOk}
+                  onChange={(e) => setCancelForaPrazoOk(e.target.checked)}
+                />
+                <span>Estou ciente e quero tentar o cancelamento extemporâneo.</span>
+              </label>
+            </div>
+          ) : null}
           <div>
             <Label>Certificado para assinar</Label>
             <Select value={certRef} onChange={(e) => setCertRef(e.target.value)}>
@@ -447,6 +485,15 @@ export function NFeDetailsPage(): React.ReactElement {
 }
 
 /** Espelha o helper do NFeNewPage: materializa code+details+requestId num bloco unico. */
+/** "3 dias e 5h" / "31h" — só para o aviso de cancelamento fora do prazo. */
+function formatHorasDesdeAutorizacao(horas: number): string {
+  if (!Number.isFinite(horas)) return 'tempo desconhecido';
+  if (horas < 48) return `${Math.floor(horas)}h`;
+  const dias = Math.floor(horas / 24);
+  const resto = Math.floor(horas % 24);
+  return resto > 0 ? `${dias} dias e ${resto}h` : `${dias} dias`;
+}
+
 function formatActionError(err: unknown, fallback: string): string {
   if (!(err instanceof ApiError)) {
     return err instanceof Error ? err.message : fallback;

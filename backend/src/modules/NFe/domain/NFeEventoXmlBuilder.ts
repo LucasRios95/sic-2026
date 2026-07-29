@@ -19,7 +19,8 @@ export class NFeEventoXmlBuilder {
 
   /**
    * Compõe o XML de um evento de cancelamento. Identificador único do evento:
-   * `ID = "ID" + tpEvento(6) + chaveAcesso(44) + nSeqEvento(2)` = 53 caracteres.
+   * `ID = "ID" + tpEvento(6) + chaveAcesso(44) + nSeqEvento(2)` = 54 caracteres
+   * (2 letras "ID" + 52 dígitos).
    */
   buildCancelamento(input: {
     chaveAcesso: string;

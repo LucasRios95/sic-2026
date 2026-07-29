@@ -12,6 +12,7 @@ export class CancelarNFeController {
       nfeId: request.params.id,
       justificativa: request.body.justificativa,
       certificateVaultRef: request.body.certificateVaultRef,
+      forcarForaPrazo: request.body.forcarForaPrazo,
     });
     return response.json({ data: result });
   }

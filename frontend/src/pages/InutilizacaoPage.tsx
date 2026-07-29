@@ -107,7 +107,8 @@ export function InutilizacaoPage(): React.ReactElement {
             </p>
             <p>
               <strong>Quando NÃO usar:</strong> NF-e já emitida que precisa ser anulada — nesse
-              caso use <em>Cancelamento</em> (dentro de 24h) ou nota de devolução.
+              caso use <em>Cancelamento</em> (24h, ou extemporâneo sujeito à SEFAZ) ou nota de
+              devolução.
             </p>
             <p>Justificativa precisa ter no mínimo 15 caracteres. Toda inutilização fica em auditoria.</p>
           </div>

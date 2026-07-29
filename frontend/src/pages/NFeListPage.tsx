@@ -242,6 +242,9 @@ function NFeReportTable({
   const [deleteTarget, setDeleteTarget] = useState<NFeListItem | null>(null);
   const [certRef, setCertRef] = useState('');
   const [cancelJust, setCancelJust] = useState('');
+  // Ciência do cancelamento extemporâneo (após 24h da autorização).
+  const [cancelForaPrazoOk, setCancelForaPrazoOk] = useState(false);
+  const cancelForaDoPrazo = cancelTarget ? rowActions(cancelTarget).foraDoPrazo : false;
 
   const { data: certificates } = useQuery({
     queryKey: ['certificates'],
@@ -261,9 +264,27 @@ function NFeReportTable({
 
   const cancelMutation = useMutation({
     mutationFn: () =>
-      cancelNFe(cancelTarget!.id, { justificativa: cancelJust, certificateVaultRef: certRef }),
-    onSuccess: () => {
-      toast.success('NF-e cancelada.');
+      cancelNFe(cancelTarget!.id, {
+        justificativa: cancelJust,
+        certificateVaultRef: certRef,
+        forcarForaPrazo: cancelForaPrazoOk,
+      }),
+    onSuccess: (result) => {
+      // HTTP 200 não significa cancelamento aceito: a SEFAZ pode rejeitar o evento
+      // (cStat ≠ 135/155) e a nota seguir autorizada — comum no envio extemporâneo.
+      if (result.cStat !== '135' && result.cStat !== '155') {
+        toast.error(
+          `Cancelamento rejeitado pela SEFAZ${result.cStat ? ` (cStat ${result.cStat})` : ''}: ` +
+            (result.xMotivo ?? 'motivo não informado'),
+        );
+        onChanged();
+        return;
+      }
+      toast.success(
+        result.cStat === '155'
+          ? 'NF-e cancelada fora do prazo (cStat 155) — pode gerar multa.'
+          : 'NF-e cancelada.',
+      );
       resetCancel();
       onChanged();
     },
@@ -284,6 +305,7 @@ function NFeReportTable({
     setCancelTarget(null);
     setCancelJust('');
     setCertRef('');
+    setCancelForaPrazoOk(false);
   }
 
   return (
@@ -368,7 +390,11 @@ function NFeReportTable({
                         ) : null}
                         {flags.canCancel ? (
                           <IconButton
-                            title="Cancelar NF-e"
+                            title={
+                              flags.foraDoPrazo
+                                ? 'Cancelar NF-e (fora das 24h — extemporâneo)'
+                                : 'Cancelar NF-e'
+                            }
                             variant="destructive"
                             onClick={() => setCancelTarget(nfe)}
                           >
@@ -419,13 +445,18 @@ function NFeReportTable({
       {/* === Modal: Cancelar === */}
       <Modal
         open={cancelTarget !== null}
-        title="Cancelar NF-e"
-        description="Ação irreversível. Disponível por até 24h após a autorização."
+        title={cancelForaDoPrazo ? 'Cancelar NF-e (fora do prazo)' : 'Cancelar NF-e'}
+        description={
+          cancelForaDoPrazo
+            ? 'Passadas as 24h da autorização, o cancelamento é extemporâneo: quem aceita ou recusa é a SEFAZ.'
+            : 'Ação irreversível. Prazo padrão de 24h após a autorização.'
+        }
         onClose={resetCancel}
         onConfirm={() => cancelMutation.mutate()}
         confirmLabel="Confirmar cancelamento"
         destructive
         loading={cancelMutation.isPending}
+        confirmDisabled={cancelForaDoPrazo && !cancelForaPrazoOk}
       >
         <div className="space-y-3">
           {cancelTarget ? (
@@ -433,6 +464,24 @@ function NFeReportTable({
               NF-e nº <strong>{String(cancelTarget.numero).padStart(9, '0')}</strong> · Série{' '}
               {cancelTarget.serie} · {cancelTarget.customerNome ?? '—'}
             </p>
+          ) : null}
+          {cancelForaDoPrazo ? (
+            <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm space-y-2">
+              <p className="text-muted-foreground">
+                Fora da janela de 24h. O evento será transmitido mesmo assim: a SEFAZ pode
+                homologar fora do prazo (cStat 155, sujeito a multa) ou rejeitar — e, se
+                rejeitar, a nota continua autorizada.
+              </p>
+              <label className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-border"
+                  checked={cancelForaPrazoOk}
+                  onChange={(e) => setCancelForaPrazoOk(e.target.checked)}
+                />
+                <span>Estou ciente e quero tentar o cancelamento extemporâneo.</span>
+              </label>
+            </div>
           ) : null}
           <div>
             <Label>Certificado para assinar</Label>
@@ -487,6 +536,8 @@ function NFeReportTable({
 interface RowFlags {
   isAuthorized: boolean;
   canCancel: boolean;
+  /** Passou das 24h da autorização — cancelamento vira extemporâneo. */
+  foraDoPrazo: boolean;
   canReissue: boolean;
   canDelete: boolean;
   canDownloadXml: boolean;
@@ -500,7 +551,10 @@ function rowActions(nfe: NFeListItem): RowFlags {
     : Infinity;
   return {
     isAuthorized,
-    canCancel: isAuthorized && hoursSinceAuth <= 24,
+    // Fora das 24h o cancelamento continua disponível como extemporâneo — quem decide
+    // é a SEFAZ. O modal exige ciência explícita antes de transmitir.
+    canCancel: isAuthorized,
+    foraDoPrazo: isAuthorized && hoursSinceAuth > 24,
     canReissue: ['REJECTED', 'PENDING', 'DENIED'].includes(nfe.status),
     canDelete: ['DRAFT', 'PENDING', 'SUBMITTED', 'REJECTED', 'ERROR'].includes(nfe.status),
     canDownloadXml: ['AUTHORIZED', 'REJECTED', 'DENIED', 'SUBMITTED', 'PROCESSING'].includes(

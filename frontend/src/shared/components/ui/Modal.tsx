@@ -14,6 +14,8 @@ interface Props {
   cancelLabel?: string;
   destructive?: boolean;
   loading?: boolean;
+  /** Bloqueia o botão de confirmar (ex.: aguardando ciência de uma ação de risco). */
+  confirmDisabled?: boolean;
 }
 
 /**
@@ -31,6 +33,7 @@ export function Modal({
   cancelLabel = 'Cancelar',
   destructive,
   loading,
+  confirmDisabled,
 }: Props): React.ReactElement | null {
   if (!open) return null;
   return (
@@ -60,6 +63,7 @@ export function Modal({
               variant={destructive ? 'destructive' : 'primary'}
               onClick={() => void onConfirm()}
               loading={loading}
+              disabled={confirmDisabled}
             >
               {confirmLabel}
             </Button>

@@ -67,8 +67,10 @@ disponíveis para NFe autorizada:
   numa nova aba.
 - **Enviar por e-mail** — Modal com campo `to` opcional; default é `Customer.email`.
 - **Carta de Correção** — Modal com texto (15-1000 chars) + seleção de certificado.
-- **Cancelar** — Modal com justificativa (mín 15 chars). Botão fica desabilitado quando
-  passou de 24h da autorização (orienta usar CC-e ou nota de devolução).
+- **Cancelar** — Modal com justificativa (mín 15 chars). Passadas 24h da autorização o
+  cancelamento vira extemporâneo: o modal exibe o aviso e exige a marcação de ciência
+  (envia `forcarForaPrazo`), e quem homologa (cStat 155) ou rejeita (ex.: 501) é a SEFAZ
+  da UF. Se rejeitar, a nota segue autorizada — aí o caminho é nota de devolução.
 
 Timeline de eventos abaixo mostra cancelamentos, CC-e e seus protocolos SEFAZ.
 

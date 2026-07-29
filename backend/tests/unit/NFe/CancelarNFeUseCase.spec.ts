@@ -154,12 +154,51 @@ describe('CancelarNFeUseCase', () => {
     expect(nfeRepo.update).toHaveBeenCalled();
   });
 
-  it('rejeita fora do prazo (>24h)', async () => {
-    const { useCase } = setup(makeNFeAuthorized(25));
+  it('rejeita fora do prazo (>24h) sem opt-in de extemporâneo', async () => {
+    const { useCase, soap } = setup(makeNFeAuthorized(25));
     await expect(useCase.execute(baseRequest)).rejects.toBeInstanceOf(BusinessRuleError);
     await expect(useCase.execute(baseRequest)).rejects.toMatchObject({
       code: 'NFE_CANCELLATION_DEADLINE_EXCEEDED',
     });
+    expect(soap.call).not.toHaveBeenCalled();
+  });
+
+  it('transmite fora do prazo com forcarForaPrazo e deixa a SEFAZ decidir', async () => {
+    const { useCase, soap, nfeRepo } = setup(makeNFeAuthorized(72));
+    (soap.call as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      cStat: '155', // "Cancelamento homologado fora de prazo"
+      xMotivo: 'Cancelamento homologado fora de prazo',
+      responseXml: '<retEvento><nProt>987654321</nProt></retEvento>',
+      durationMs: 100,
+      httpStatus: 200,
+      endpointUrl: 'https://test',
+    });
+
+    const result = await useCase.execute({ ...baseRequest, forcarForaPrazo: true });
+
+    expect(soap.call).toHaveBeenCalledOnce();
+    expect(result.cStat).toBe('155');
+    expect(result.foraDoPrazo).toBe(true);
+    expect(result.nfe.status).toBe(DocumentStatus.CANCELLED);
+    expect(nfeRepo.update).toHaveBeenCalled();
+  });
+
+  it('extemporâneo rejeitado pela UF (cStat 501) mantém a NFe autorizada', async () => {
+    const { useCase, soap, nfeRepo } = setup(makeNFeAuthorized(720));
+    (soap.call as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      cStat: '501', // "Prazo de cancelamento superior ao previsto na legislação"
+      xMotivo: 'Prazo de cancelamento superior ao previsto na legislação',
+      responseXml: '<x/>',
+      durationMs: 50,
+      httpStatus: 200,
+      endpointUrl: 'https://test',
+    });
+
+    const result = await useCase.execute({ ...baseRequest, forcarForaPrazo: true });
+
+    expect(result.cStat).toBe('501');
+    expect(result.foraDoPrazo).toBe(true);
+    expect(nfeRepo.update).not.toHaveBeenCalled();
   });
 
   it('rejeita justificativa curta (<15 chars) sem chamar SEFAZ', async () => {

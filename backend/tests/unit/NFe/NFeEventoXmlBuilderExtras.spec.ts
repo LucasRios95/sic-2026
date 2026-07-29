@@ -13,14 +13,14 @@ describe('NFeEventoXmlBuilder.buildCartaCorrecao', () => {
     dhEvento: new Date('2026-06-15T12:00:00Z'),
   };
 
-  it('gera evento CC-e com tpEvento 110110 e Id de 53 chars', () => {
+  it('gera evento CC-e com tpEvento 110110 e Id de 54 chars', () => {
     const { xml, eventoId } = builder.buildCartaCorrecao({
       ...base,
       nSeqEvento: 1,
       correcao: 'Correção do nome da transportadora',
     });
     expect(eventoId).toBe(`ID110110${base.chaveAcesso}01`);
-    expect(eventoId).toHaveLength(53);
+    expect(eventoId).toHaveLength(54);
     expect(xml).toContain('<tpEvento>110110</tpEvento>');
     expect(xml).toContain('<descEvento>Carta de Correcao</descEvento>');
     expect(xml).toContain('<xCorrecao>Correção do nome da transportadora</xCorrecao>');

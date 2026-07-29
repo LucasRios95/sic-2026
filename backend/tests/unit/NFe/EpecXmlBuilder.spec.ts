@@ -22,10 +22,10 @@ describe('EpecXmlBuilder', () => {
     ieEmitente: '987654321',
   };
 
-  it('gera evento com tpEvento 110140 e Id de 53 chars', () => {
+  it('gera evento com tpEvento 110140 e Id de 54 chars', () => {
     const { xml, eventoId } = builder.build(baseInput);
     expect(eventoId).toBe(`ID110140${chave}01`);
-    expect(eventoId).toHaveLength(53);
+    expect(eventoId).toHaveLength(54);
     expect(xml).toContain('<tpEvento>110140</tpEvento>');
     expect(xml).toContain('<descEvento>EPEC</descEvento>');
   });

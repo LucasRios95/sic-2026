@@ -2,6 +2,7 @@ import { create } from 'xmlbuilder2';
 
 import { AmbienteSefaz } from '@modules/Companies/infra/typeorm/entities/Company';
 import { UF_CODIGO } from '@modules/NFe/domain/nfe-enums';
+import { formatSefazDateTime } from '@modules/NFe/domain/sefaz-datetime';
 
 import { TIPO_MANIFESTACAO_CODIGO, TipoManifestacao } from './nfe-recepcao-enums';
 
@@ -54,7 +55,7 @@ export class ManifestacaoXmlBuilder {
     infEvento.ele('tpAmb').txt(input.ambiente === AmbienteSefaz.PRODUCAO ? '1' : '2').up();
     infEvento.ele('CNPJ').txt(cnpj).up();
     infEvento.ele('chNFe').txt(input.chaveAcesso).up();
-    infEvento.ele('dhEvento').txt(input.dhEvento.toISOString()).up();
+    infEvento.ele('dhEvento').txt(formatSefazDateTime(input.dhEvento)).up();
     infEvento.ele('tpEvento').txt(tpEvento).up();
     infEvento.ele('nSeqEvento').txt('1').up();
     infEvento.ele('verEvento').txt('1.00').up();

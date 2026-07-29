@@ -26,19 +26,29 @@ interface IRequest {
   justificativa: string;
   certificateVaultRef: string;
   userId: string;
+  /**
+   * Cancelamento extemporâneo: libera o envio depois da janela padrão de 24h.
+   * Quem decide se aceita é a SEFAZ da UF — ver comentário do prazo abaixo.
+   */
+  forcarForaPrazo?: boolean;
 }
 
 interface IResponse {
   nfe: NFe;
   cStat: string | null;
   xMotivo: string | null;
+  /** true quando o evento foi transmitido fora da janela de 24h. */
+  foraDoPrazo: boolean;
 }
+
+/** Janela padrão nacional de cancelamento, em horas, contada da autorização. */
+const PRAZO_PADRAO_HORAS = 24;
 
 /**
  * Cancelamento de NF-e (PRD NFE-05). Regras:
  *  - NF-e precisa estar AUTHORIZED.
- *  - Janela legal: 24h após autorização (algumas UFs aceitam até 7 dias mediante regime
- *    especial — checado caso a caso; aqui aplicamos a regra padrão).
+ *  - Janela padrão: 24h após autorização. Fora dela o cancelamento só sai com
+ *    `forcarForaPrazo` (extemporâneo) — quem homologa ou rejeita é a SEFAZ da UF.
  *  - Justificativa obrigatória, mínimo 15 caracteres (MOC).
  *  - Sequencial 1 (cancelamento é único — NFE não permite "recancelar").
  *
@@ -97,15 +107,28 @@ export class CancelarNFeUseCase {
       );
     }
 
-    // Prazo: 24h após autorização. Fora do prazo, sugerimos CC-e ou nota de devolução
-    // (PRD Fluxo Crítico 5) — não implementamos sugestão automática aqui, mas a mensagem
-    // de erro orienta o usuário.
+    // Prazo: 24h após autorização. Passado isso o cancelamento vira "extemporâneo" —
+    // várias UFs ainda o homologam (SEFAZ responde cStat 155, normalmente com multa por
+    // descumprimento de obrigação acessória); as que não permitem rejeitam com cStat 501.
+    // Como a regra varia por UF, não decidimos aqui: exigimos o opt-in explícito do
+    // usuário (`forcarForaPrazo`) e deixamos a SEFAZ dar a palavra final. Se rejeitar,
+    // a nota continua AUTHORIZED e o caminho é Nota de Devolução (PRD Fluxo Crítico 5).
     const horasDesdeAutorizacao = dayjs().diff(dayjs(nfe.dhAutorizacao), 'hour', true);
-    if (horasDesdeAutorizacao > 24) {
+    const foraDoPrazo = horasDesdeAutorizacao > PRAZO_PADRAO_HORAS;
+    if (foraDoPrazo && !request.forcarForaPrazo) {
       throw new BusinessRuleError(
-        `Prazo legal de cancelamento (24h) excedido em ${(horasDesdeAutorizacao - 24).toFixed(1)}h. ` +
-          'Use Carta de Correção (CC-e) para campos corrigíveis ou Nota de Devolução para reverter a operação.',
+        `Prazo padrão de cancelamento (${PRAZO_PADRAO_HORAS}h) excedido em ` +
+          `${(horasDesdeAutorizacao - PRAZO_PADRAO_HORAS).toFixed(1)}h. ` +
+          'É possível tentar o cancelamento extemporâneo (sujeito à legislação da UF e a multa), ' +
+          'confirmando a ciência no formulário. Alternativas: CC-e para campos corrigíveis ou ' +
+          'Nota de Devolução para reverter a operação.',
         'NFE_CANCELLATION_DEADLINE_EXCEEDED',
+      );
+    }
+    if (foraDoPrazo) {
+      logger.warn(
+        { nfeId: nfe.id, horasDesdeAutorizacao: Number(horasDesdeAutorizacao.toFixed(1)) },
+        'Cancelamento extemporâneo autorizado pelo usuário — enviando para a SEFAZ decidir',
       );
     }
 
@@ -195,6 +218,8 @@ export class CancelarNFeUseCase {
         cStat,
         xMotivo,
         justificativa: request.justificativa,
+        foraDoPrazo,
+        horasDesdeAutorizacao: Number(horasDesdeAutorizacao.toFixed(1)),
       },
     });
 
@@ -204,7 +229,10 @@ export class CancelarNFeUseCase {
         userId: request.userId,
         category: 'nfe.cancelled',
         title: `NF-e ${nfe.numero} cancelada`,
-        message: `Cancelamento registrado na SEFAZ (cStat ${cStat}).`,
+        message:
+          cStat === '155'
+            ? `Cancelamento homologado FORA DO PRAZO (cStat 155) — pode gerar multa por obrigação acessória.`
+            : `Cancelamento registrado na SEFAZ (cStat ${cStat}).`,
         link: `/fiscal/nfe/${nfe.id}`,
       });
     } else {
@@ -218,7 +246,7 @@ export class CancelarNFeUseCase {
       });
     }
 
-    return { nfe: updated, cStat: cStat ?? null, xMotivo: xMotivo ?? null };
+    return { nfe: updated, cStat: cStat ?? null, xMotivo: xMotivo ?? null, foraDoPrazo };
   }
 }
 

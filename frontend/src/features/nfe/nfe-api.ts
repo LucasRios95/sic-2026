@@ -220,11 +220,15 @@ export async function previewDanfe(payload: PreviewDanfePayload): Promise<Blob> 
   return response.blob();
 }
 
+/**
+ * `forcarForaPrazo` libera o cancelamento extemporâneo (após 24h da autorização):
+ * o backend transmite e a SEFAZ decide — 155 (homologado fora do prazo) ou rejeição.
+ */
 export async function cancelNFe(
   id: string,
-  payload: { justificativa: string; certificateVaultRef: string },
-): Promise<{ nfe: NFeFull; cStat: string | null; xMotivo: string | null }> {
-  return api<{ nfe: NFeFull; cStat: string | null; xMotivo: string | null }>(
+  payload: { justificativa: string; certificateVaultRef: string; forcarForaPrazo?: boolean },
+): Promise<{ nfe: NFeFull; cStat: string | null; xMotivo: string | null; foraDoPrazo: boolean }> {
+  return api<{ nfe: NFeFull; cStat: string | null; xMotivo: string | null; foraDoPrazo: boolean }>(
     `/nfe/${id}/cancel`,
     {
       method: 'POST',

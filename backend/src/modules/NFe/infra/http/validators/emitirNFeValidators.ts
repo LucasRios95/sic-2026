@@ -154,6 +154,11 @@ export const cancelarNFeSchema = z.object({
     .min(15, 'Justificativa exige no mínimo 15 caracteres (regra SEFAZ)')
     .max(255),
   certificateVaultRef: z.string().min(3).max(200),
+  /**
+   * Opt-in do cancelamento extemporâneo (após as 24h da autorização). Sem ele o
+   * backend recusa antes de transmitir; com ele, a SEFAZ é quem decide (155 x 501).
+   */
+  forcarForaPrazo: z.boolean().optional().default(false),
 });
 
 export const emitirEpecSchema = z.object({
