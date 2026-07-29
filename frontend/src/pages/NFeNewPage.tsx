@@ -26,6 +26,7 @@ import {
 } from '@/features/nfe/nfe-draft';
 import { getProduct, listProducts } from '@/features/products/products-api';
 import { ApiError } from '@/lib/api';
+import { formatDecimal, parseDecimal, toDecimalInput } from '@/lib/format';
 import { Badge } from '@/shared/components/ui/Badge';
 import { Button } from '@/shared/components/ui/Button';
 import {
@@ -63,15 +64,28 @@ const makeRow = (): ItemRow => ({
   productId: '',
   cfop: '5102',
   quantidade: '1',
-  valorUnitario: '0.00',
-  valorDesconto: '0.00',
-  valorFrete: '0.00',
+  valorUnitario: '0,00',
+  valorDesconto: '0,00',
+  valorFrete: '0,00',
   icmsCodigo: '',
 });
 
+/**
+ * Campos numéricos deste form são digitados no padrão brasileiro ("20,00"), mas a API
+ * exige ponto decimal. Toda saída para payload passa por aqui — nunca envie o texto cru.
+ */
+function paraApi(v: string): string {
+  return parseDecimal(v);
+}
+
+/** Número a partir do texto digitado (aceita vírgula) — para comparações e filtros. */
+function numeroDigitado(v: string): number {
+  return Number(parseDecimal(v));
+}
+
 /** Normaliza um valor monetário opcional: só envia quando > 0 (evita mandar "0.00" à toa). */
 function valorPositivoOuUndefined(v: string): string | undefined {
-  return Number(v) > 0 ? v : undefined;
+  return numeroDigitado(v) > 0 ? paraApi(v) : undefined;
 }
 
 /** CSOSN (Simples Nacional) — código + descrição curta. */
@@ -325,10 +339,11 @@ export function NFeNewPage(): React.ReactElement {
           id: `row-${nextRowId++}`,
           productId: it.productId ?? '',
           cfop: it.cfop,
-          quantidade: it.quantidadeComercial,
-          valorUnitario: it.valorUnitario,
-          valorDesconto: it.valorDesconto ?? '0.00',
-          valorFrete: it.valorFrete ?? '0.00',
+          // A API devolve ponto decimal; os inputs deste form são em padrão BR.
+          quantidade: toDecimalInput(it.quantidadeComercial),
+          valorUnitario: toDecimalInput(it.valorUnitario),
+          valorDesconto: toDecimalInput(it.valorDesconto ?? '0.00'),
+          valorFrete: toDecimalInput(it.valorFrete ?? '0.00'),
           icmsCodigo: '', // reemissão usa o código da regra vigente do produto
         })),
       );
@@ -491,7 +506,7 @@ export function NFeNewPage(): React.ReactElement {
   // Debounce do payload do simulate para evitar tempestade de requests enquanto digita.
   const simulateInput = useMemo(() => {
     if (!activeCustomer) return null;
-    const validItems = items.filter((it) => it.productId && Number(it.quantidade) > 0);
+    const validItems = items.filter((it) => it.productId && numeroDigitado(it.quantidade) > 0);
     if (validItems.length === 0) return null;
     return {
       destinatario: {
@@ -502,8 +517,8 @@ export function NFeNewPage(): React.ReactElement {
       itens: validItems.map((it) => ({
         itemId: it.id,
         productId: it.productId,
-        quantidade: it.quantidade,
-        valorUnitario: it.valorUnitario,
+        quantidade: paraApi(it.quantidade),
+        valorUnitario: paraApi(it.valorUnitario),
         valorDesconto: valorPositivoOuUndefined(it.valorDesconto),
         valorFrete: valorPositivoOuUndefined(it.valorFrete),
         cfop: it.cfop,
@@ -550,10 +565,10 @@ export function NFeNewPage(): React.ReactElement {
               volumes: volumeTemDado
                 ? [
                     {
-                      quantidade: volQtd ? Number(volQtd) : undefined,
+                      quantidade: volQtd ? numeroDigitado(volQtd) : undefined,
                       especie: volEspecie || undefined,
-                      pesoLiquido: volPesoLiq || undefined,
-                      pesoBruto: volPesoBruto || undefined,
+                      pesoLiquido: volPesoLiq ? paraApi(volPesoLiq) : undefined,
+                      pesoBruto: volPesoBruto ? paraApi(volPesoBruto) : undefined,
                     },
                   ]
                 : undefined,
@@ -584,8 +599,8 @@ export function NFeNewPage(): React.ReactElement {
             productId: it.productId,
             cfop: it.cfop,
             unidadeComercial: productCacheRef.current[it.productId]?.unidadeComercial ?? 'UN',
-            quantidade: it.quantidade,
-            valorUnitario: it.valorUnitario,
+            quantidade: paraApi(it.quantidade),
+            valorUnitario: paraApi(it.valorUnitario),
             valorDesconto: valorPositivoOuUndefined(it.valorDesconto),
             valorFrete: valorPositivoOuUndefined(it.valorFrete),
             // Override do código de ICMS, conforme o regime da empresa. Vazio = usa a regra.
@@ -659,10 +674,10 @@ export function NFeNewPage(): React.ReactElement {
             volumes: volumeTemDado
               ? [
                   {
-                    quantidade: volQtd ? Number(volQtd) : undefined,
+                    quantidade: volQtd ? numeroDigitado(volQtd) : undefined,
                     especie: volEspecie || undefined,
-                    pesoLiquido: volPesoLiq || undefined,
-                    pesoBruto: volPesoBruto || undefined,
+                    pesoLiquido: volPesoLiq ? paraApi(volPesoLiq) : undefined,
+                    pesoBruto: volPesoBruto ? paraApi(volPesoBruto) : undefined,
                   },
                 ]
               : undefined,
@@ -688,8 +703,8 @@ export function NFeNewPage(): React.ReactElement {
         productId: it.productId,
         cfop: it.cfop,
         unidadeComercial: productCacheRef.current[it.productId]?.unidadeComercial ?? 'UN',
-        quantidade: it.quantidade,
-        valorUnitario: it.valorUnitario,
+        quantidade: paraApi(it.quantidade),
+        valorUnitario: paraApi(it.valorUnitario),
         valorDesconto: valorPositivoOuUndefined(it.valorDesconto),
         valorFrete: valorPositivoOuUndefined(it.valorFrete),
         ...(it.icmsCodigo
@@ -1065,6 +1080,9 @@ export function NFeNewPage(): React.ReactElement {
                 <Input
                   value={row.quantidade}
                   onChange={(e) => updateItem(row.id, { quantidade: e.target.value })}
+                  inputMode="decimal"
+                  placeholder="1,00"
+                  title="Quantidade — use vírgula para os decimais (ex.: 1,5)"
                 />
               </div>
               <div className="space-y-1">
@@ -1072,6 +1090,9 @@ export function NFeNewPage(): React.ReactElement {
                 <Input
                   value={row.valorUnitario}
                   onChange={(e) => updateItem(row.id, { valorUnitario: e.target.value })}
+                  inputMode="decimal"
+                  placeholder="0,00"
+                  title="Valor unitário em R$ — use vírgula para os centavos (ex.: 20,00)"
                 />
               </div>
               <div className="space-y-1">
@@ -1079,7 +1100,9 @@ export function NFeNewPage(): React.ReactElement {
                 <Input
                   value={row.valorDesconto}
                   onChange={(e) => updateItem(row.id, { valorDesconto: e.target.value })}
-                  title="Desconto do item (R$)"
+                  inputMode="decimal"
+                  placeholder="0,00"
+                  title="Desconto do item (R$) — use vírgula para os centavos"
                 />
               </div>
               <div className="space-y-1">
@@ -1087,7 +1110,9 @@ export function NFeNewPage(): React.ReactElement {
                 <Input
                   value={row.valorFrete}
                   onChange={(e) => updateItem(row.id, { valorFrete: e.target.value })}
-                  title="Frete do item (R$) — soma no vFrete da nota"
+                  inputMode="decimal"
+                  placeholder="0,00"
+                  title="Frete do item (R$) — soma no vFrete da nota; use vírgula para os centavos"
                 />
               </div>
               <div className="space-y-1">
@@ -1242,7 +1267,8 @@ export function NFeNewPage(): React.ReactElement {
                     <Input
                       value={volPesoLiq}
                       onChange={(e) => setVolPesoLiq(e.target.value)}
-                      placeholder="0.000"
+                      inputMode="decimal"
+                      placeholder="0,000"
                     />
                   </div>
                   <div className="space-y-1">
@@ -1250,7 +1276,8 @@ export function NFeNewPage(): React.ReactElement {
                     <Input
                       value={volPesoBruto}
                       onChange={(e) => setVolPesoBruto(e.target.value)}
-                      placeholder="0.000"
+                      inputMode="decimal"
+                      placeholder="0,000"
                     />
                   </div>
                 </div>
@@ -1420,7 +1447,7 @@ function Cell({
     <div>
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className={emphasized ? 'text-lg font-bold' : 'text-base font-medium'}>
-        R$ {value}
+        R$ {formatDecimal(value)}
       </div>
     </div>
   );

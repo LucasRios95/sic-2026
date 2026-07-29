@@ -8,6 +8,7 @@ import {
   getReport,
   type ReportType,
 } from '@/features/reports/reports-api';
+import { formatMoney, formatPercent, formatQuantidade } from '@/lib/format';
 import { PageContainer } from '@/shared/components/PageContainer';
 import { PageHeader } from '@/shared/components/PageHeader';
 import { Badge } from '@/shared/components/ui/Badge';
@@ -204,13 +205,11 @@ function labelize(value: string): string {
 function formatValue(key: string, value: string | number | null | undefined): string {
   if (value === null || value === undefined) return '-';
   const asNumber = Number(value);
-  if (
-    !Number.isNaN(asNumber) &&
-    /valor|base|total/i.test(key) &&
-    !/participacao/i.test(key)
-  ) {
-    return asNumber.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-  }
-  if (!Number.isNaN(asNumber) && /participacao/i.test(key)) return `${value}%`;
+  if (Number.isNaN(asNumber)) return String(value);
+
+  if (/participacao|aliquota|percentual/i.test(key)) return formatPercent(value, String(value));
+  if (/valor|base|total/i.test(key)) return formatMoney(value, String(value));
+  // Quantidades/pesos também são numéricos e precisam de vírgula decimal.
+  if (/quantidade|qtd|peso/i.test(key)) return formatQuantidade(value, String(value));
   return String(value);
 }

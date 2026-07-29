@@ -22,6 +22,7 @@ import {
   generateDanfe,
   listNFes,
 } from '@/features/nfe/nfe-api';
+import { formatMoney } from '@/lib/format';
 import { PageContainer } from '@/shared/components/PageContainer';
 import { PageHeader } from '@/shared/components/PageHeader';
 import { Badge } from '@/shared/components/ui/Badge';
@@ -617,8 +618,5 @@ function formatDoc(doc: string | null): string {
 }
 
 function formatBRL(value: string): string {
-  const n = Number(value);
-  return Number.isNaN(n)
-    ? `R$ ${value}`
-    : n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  return formatMoney(value, `R$ ${value}`);
 }

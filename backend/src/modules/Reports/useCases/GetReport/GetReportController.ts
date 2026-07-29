@@ -40,8 +40,17 @@ function toCsv(rows: Array<Record<string, string | number | null>>): string {
   return `${lines.join('\n')}\n`;
 }
 
+/**
+ * Decimal puro ("1234.56"), o formato em que o Postgres devolve `numeric`. Chave de
+ * acesso, CNPJ, datas e códigos não batem no padrão e passam intactos.
+ */
+const DECIMAL_PURO = /^-?\d+\.\d+$/;
+
 function csvValue(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return '';
-  const text = String(value).replace(/"/g, '""');
+  // O separador de colunas já é ';' (Excel pt-BR); com ponto decimal o Excel lê o
+  // valor como texto. Converte só números decimais para vírgula.
+  const raw = String(value);
+  const text = (DECIMAL_PURO.test(raw) ? raw.replace('.', ',') : raw).replace(/"/g, '""');
   return /[;\n"]/.test(text) ? `"${text}"` : text;
 }

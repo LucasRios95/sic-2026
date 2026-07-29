@@ -14,6 +14,7 @@ import {
 } from '@/features/nfe/nfe-api';
 import { env } from '@/env';
 import { ApiError } from '@/lib/api';
+import { formatDecimal, formatPercent, formatQuantidade } from '@/lib/format';
 import { Badge } from '@/shared/components/ui/Badge';
 import { Button } from '@/shared/components/ui/Button';
 import {
@@ -293,9 +294,13 @@ export function NFeDetailsPage(): React.ReactElement {
                   {it.numeroItem}. {it.codigo} — {it.descricao}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  NCM {it.ncm} · CFOP {it.cfop} · Qtd {it.quantidadeComercial} ·{' '}
-                  R$ {it.valorUnitario} = R$ {it.valorTotal}
-                  {it.aliqIcms ? ` · ICMS ${it.aliqIcms}% (R$ ${it.valorIcms})` : ''}
+                  NCM {it.ncm} · CFOP {it.cfop} · Qtd {formatQuantidade(it.quantidadeComercial)} ·{' '}
+                  {/* Unitário com 4 casas: é assim que vai no XML (vUnCom) e no DANFE. */}
+                  R$ {formatDecimal(it.valorUnitario, { min: 2, max: 4 })} ={' '}
+                  R$ {formatDecimal(it.valorTotal)}
+                  {it.aliqIcms
+                    ? ` · ICMS ${formatPercent(it.aliqIcms)} (R$ ${formatDecimal(it.valorIcms)})`
+                    : ''}
                 </div>
               </div>
             ))}
@@ -531,7 +536,7 @@ function Row({
   return (
     <div className="flex items-baseline justify-between">
       <span className="text-muted-foreground">{label}</span>
-      <span className={emphasized ? 'font-bold' : ''}>R$ {value}</span>
+      <span className={emphasized ? 'font-bold' : ''}>R$ {formatDecimal(value)}</span>
     </div>
   );
 }
