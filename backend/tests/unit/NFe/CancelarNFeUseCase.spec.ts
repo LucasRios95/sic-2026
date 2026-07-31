@@ -201,6 +201,61 @@ describe('CancelarNFeUseCase', () => {
     expect(nfeRepo.update).not.toHaveBeenCalled();
   });
 
+  it('duplicidade de evento (573) + consulta 101 sincroniza a nota como CANCELADA', async () => {
+    // Cenário de recuperação: um cancelamento anterior foi homologado na SEFAZ mas não
+    // ficou registrado aqui, então a retransmissão volta 573.
+    const { useCase, soap } = setup(makeNFeAuthorized(1));
+    const call = soap.call as ReturnType<typeof vi.fn>;
+    call.mockResolvedValueOnce({
+      cStat: '573',
+      xMotivo: 'Rejeicao: Duplicidade de Evento',
+      responseXml: '<x/>',
+      durationMs: 50,
+      httpStatus: 200,
+      endpointUrl: 'https://test',
+    });
+    call.mockResolvedValueOnce({
+      cStat: '101', // consulta: nota cancelada
+      xMotivo: 'Cancelamento de NF-e homologado',
+      responseXml: '<retConsSitNFe/>',
+      durationMs: 50,
+      httpStatus: 200,
+      endpointUrl: 'https://test',
+    });
+
+    const result = await useCase.execute(baseRequest);
+
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(call.mock.calls[1][0]).toMatchObject({ service: 'NFeConsultaProtocolo4' });
+    expect(result.nfe.status).toBe(DocumentStatus.CANCELLED);
+  });
+
+  it('duplicidade de evento (573) sem confirmação na consulta mantém AUTHORIZED', async () => {
+    const { useCase, soap, nfeRepo } = setup(makeNFeAuthorized(1));
+    const call = soap.call as ReturnType<typeof vi.fn>;
+    call.mockResolvedValueOnce({
+      cStat: '573',
+      xMotivo: 'Rejeicao: Duplicidade de Evento',
+      responseXml: '<x/>',
+      durationMs: 50,
+      httpStatus: 200,
+      endpointUrl: 'https://test',
+    });
+    call.mockResolvedValueOnce({
+      cStat: '100', // consulta: continua autorizada
+      xMotivo: 'Autorizado o uso da NF-e',
+      responseXml: '<retConsSitNFe/>',
+      durationMs: 50,
+      httpStatus: 200,
+      endpointUrl: 'https://test',
+    });
+
+    const result = await useCase.execute(baseRequest);
+
+    expect(result.cStat).toBe('573');
+    expect(nfeRepo.update).not.toHaveBeenCalled();
+  });
+
   it('rejeita justificativa curta (<15 chars) sem chamar SEFAZ', async () => {
     const { useCase, soap } = setup(makeNFeAuthorized(1));
     await expect(

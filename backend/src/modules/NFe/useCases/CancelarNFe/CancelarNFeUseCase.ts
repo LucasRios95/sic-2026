@@ -185,9 +185,33 @@ export class CancelarNFeUseCase {
     });
 
     // cStat 135 = Evento registrado e vinculado a NF-e; 155 = Evento registrado fora do prazo.
-    const cStat = result.cStat;
-    const xMotivo = result.xMotivo;
-    const aceito = cStat === '135' || cStat === '155';
+    // (Vem do `retEvento/infEvento`, não do cStat do lote — ver SefazSoapClient.extractStatus.)
+    let cStat = result.cStat;
+    let xMotivo = result.xMotivo;
+    let aceito = cStat === '135' || cStat === '155';
+
+    // cStat 573 = "Rejeição: Duplicidade de Evento" — já existe cancelamento registrado
+    // para esta chave. Acontece quando uma tentativa anterior foi homologada na SEFAZ mas
+    // não foi registrada aqui (ex.: timeout, ou a leitura do cStat do lote que trocava
+    // 135 por 128). Confirmamos a situação real na consulta antes de dar a nota como
+    // cancelada — nunca cancelamos só pela suposição da duplicidade.
+    if (!aceito && cStat === '573') {
+      const situacao = await this.consultarSituacao(nfe, company.uf, request.certificateVaultRef);
+      if (situacao.cStat === '101') {
+        aceito = true;
+        cStat = '135';
+        xMotivo = 'Evento de cancelamento já registrado na SEFAZ (confirmado por consulta)';
+        logger.warn(
+          { nfeId: nfe.id },
+          'Cancelamento duplicado (573) e nota consta CANCELADA na SEFAZ — sincronizando status local',
+        );
+      } else {
+        logger.warn(
+          { nfeId: nfe.id, situacaoCStat: situacao.cStat },
+          'Cancelamento rejeitado por duplicidade (573), mas consulta não confirma cancelamento',
+        );
+      }
+    }
 
     await this.eventoRepository.update(eventoRecord.id, {
       status: aceito ? DocumentStatus.AUTHORIZED : DocumentStatus.REJECTED,
@@ -247,6 +271,44 @@ export class CancelarNFeUseCase {
     }
 
     return { nfe: updated, cStat: cStat ?? null, xMotivo: xMotivo ?? null, foraDoPrazo };
+  }
+
+  /**
+   * Consulta a situação atual da NF-e na SEFAZ (NFeConsultaProtocolo4). Retorna o cStat
+   * de situação: 100 autorizada, 101 cancelada, 217 não consta na base.
+   * Falha de comunicação aqui não derruba o cancelamento — só deixa de confirmar.
+   */
+  private async consultarSituacao(
+    nfe: NFe,
+    uf: string,
+    certificateVaultRef: string,
+  ): Promise<{ cStat: string | null }> {
+    const bodyXml = [
+      '<consSitNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">',
+      `<tpAmb>${nfe.ambiente === 'PRODUCAO' ? '1' : '2'}</tpAmb>`,
+      '<xServ>CONSULTAR</xServ>',
+      `<chNFe>${nfe.chaveAcesso}</chNFe>`,
+      '</consSitNFe>',
+    ].join('');
+
+    try {
+      const consulta = await this.soap.call({
+        companyId: nfe.companyId,
+        uf,
+        ambiente: nfe.ambiente,
+        service: 'NFeConsultaProtocolo4',
+        bodyXml,
+        certificateVaultRef,
+        nfeId: nfe.id,
+      });
+      return { cStat: consulta.cStat ?? null };
+    } catch (err) {
+      logger.warn(
+        { nfeId: nfe.id, err: (err as Error).message },
+        'Falha ao consultar situação da NF-e após duplicidade de evento',
+      );
+      return { cStat: null };
+    }
   }
 }
 

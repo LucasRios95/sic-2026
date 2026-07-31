@@ -105,7 +105,7 @@ export class SefazSoapClient {
       if (httpStatus >= 400) {
         throw new Error(`HTTP ${httpStatus}`);
       }
-      ({ cStat, xMotivo } = this.extractStatus(responseXml));
+      ({ cStat, xMotivo } = this.extractStatus(responseXml, params.service));
     } catch (err) {
       const axiosErr = err as { response?: { status: number; data: string }; message: string };
       httpStatus = axiosErr.response?.status ?? httpStatus;
@@ -299,27 +299,44 @@ export class SefazSoapClient {
    * praticamente todas as respostas (status servico, autorização, evento), e são o
    * sinal primário se a chamada foi bem-sucedida.
    *
-   * Em respostas de autorização (`retEnviNFe`), o envelope traz DOIS pares cStat/xMotivo:
-   *   1. No nível do lote (ex.: 104 "Lote processado") — só diz que o lote foi recebido.
-   *   2. Dentro de `protNFe/infProt` — o status REAL da NF-e (100 autorizada, 225 rejeição
-   *      de schema, etc.). É esse que precisa virar `nfes.c_stat`/`xMotivo`.
+   * Os serviços de lote trazem DOIS pares cStat/xMotivo — o do lote e o do documento —
+   * e o par da raiz só diz que o lote foi recebido. Qual deles importa depende do serviço
+   * (ver STATUS_TAG_BY_SERVICE):
+   *   - Autorização (`retEnviNFe`): lote 104 "Lote processado" + `protNFe/infProt` com o
+   *     status REAL da NF-e (100 autorizada, 225 rejeição de schema, ...).
+   *   - Eventos (`retEnvEvento` — cancelamento/CC-e/EPEC/manifestação): lote 128 "Lote de
+   *     Evento Processado" + `retEvento/infEvento` com o status REAL do evento (135
+   *     registrado, 155 registrado fora do prazo, 501/573 rejeição, ...). Ler o cStat do
+   *     lote aqui fazia todo cancelamento aceito virar "rejeitado cStat 128".
+   *   - Inutilização (`retInutNFe`): `infInut`, sem nível de lote.
    *
-   * A busca prefere o `infProt` (mais interno e específico) e cai pra busca recursiva
-   * só quando ele não existe (ex.: respostas de Status Serviço).
+   * Serviços fora do mapa (Status Serviço, Consulta Protocolo, Consulta Cadastro,
+   * DistDFe) têm o status na raiz — inclusive a consulta, onde o cStat da raiz é a
+   * SITUAÇÃO atual da nota (101 cancelada) e não o protocolo de autorização original.
    */
-  private extractStatus(xml: string): { cStat?: string; xMotivo?: string } {
+  private extractStatus(
+    xml: string,
+    service: SefazService,
+  ): { cStat?: string; xMotivo?: string } {
     if (!xml) return {};
     try {
       const parsed = this.xmlParser.parse(xml) as Record<string, unknown>;
-      const infProt = this.findFirstByKey(parsed, 'infProt');
-      if (infProt && typeof infProt === 'object') {
-        const o = infProt as Record<string, unknown>;
-        if (o.cStat !== undefined || o.xMotivo !== undefined) {
-          return {
-            cStat: o.cStat !== undefined ? String(o.cStat) : undefined,
-            xMotivo: o.xMotivo !== undefined ? String(o.xMotivo) : undefined,
-          };
+      const tag = SefazSoapClient.STATUS_TAG_BY_SERVICE[service];
+      if (tag) {
+        const found = this.findFirstByKey(parsed, tag);
+        // Lote com vários documentos/eventos vira array — aqui só mandamos 1 por lote.
+        const node = Array.isArray(found) ? found[0] : found;
+        if (node && typeof node === 'object') {
+          const o = node as Record<string, unknown>;
+          if (o.cStat !== undefined || o.xMotivo !== undefined) {
+            return {
+              cStat: o.cStat !== undefined ? String(o.cStat) : undefined,
+              xMotivo: o.xMotivo !== undefined ? String(o.xMotivo) : undefined,
+            };
+          }
         }
+        // Sem a tag interna (ex.: rejeição do lote inteiro, que nem gera protNFe/retEvento)
+        // o par da raiz é a única informação disponível — cai na busca recursiva abaixo.
       }
       const findRecursive = (obj: unknown): { cStat?: string; xMotivo?: string } => {
         if (!obj || typeof obj !== 'object') return {};
@@ -341,6 +358,17 @@ export class SefazSoapClient {
       return {};
     }
   }
+
+  /**
+   * Tag que carrega o cStat do DOCUMENTO em cada serviço de lote. Serviços ausentes daqui
+   * têm o status na raiz da resposta.
+   */
+  private static readonly STATUS_TAG_BY_SERVICE: Partial<Record<SefazService, string>> = {
+    NFeAutorizacao4: 'infProt',
+    NFeRetAutorizacao4: 'infProt',
+    NFeRecepcaoEvento4: 'infEvento',
+    NFeInutilizacao4: 'infInut',
+  };
 
   /** Procura recursivamente a primeira ocorrência de uma chave no objeto parseado. */
   private findFirstByKey(obj: unknown, key: string): unknown {

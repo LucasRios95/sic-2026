@@ -21,6 +21,7 @@
     "seed": "tsx src/shared/infra/typeorm/seeds/run-seeds.ts",
     "import:legacy": "tsx src/shared/infra/typeorm/seeds/legacy-import/index.ts",
     "import:canguera": "tsx src/shared/infra/typeorm/seeds/legacy-import-canguera/index.ts",
+    "consultar:nfe": "tsx scripts/consultar-nfe.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
