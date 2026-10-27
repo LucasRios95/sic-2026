@@ -56,6 +56,8 @@ export interface Product {
   id: string;
   companyId: string;
   codigo: string;
+  /** GTIN/EAN (código de barras) — vai em cEAN/cEANTrib da NF-e. */
+  codigoBarras?: string | null;
   descricao: string;
   ncm: string;
   cest?: string | null;

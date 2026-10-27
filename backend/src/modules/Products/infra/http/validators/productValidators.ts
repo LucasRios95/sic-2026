@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { CstIbsCbs } from '@shared/types/fiscal-enums';
+import { isValidGtin } from '@shared/utils/document-validators';
 
 // Validação de valores monetários/percentuais como string (TypeORM Decimal => string).
 const decimalString = z.string().regex(/^-?\d+(\.\d+)?$/, 'Valor decimal inválido');
@@ -108,7 +109,8 @@ export const createProductSchema = z.object({
   codigo: z.string().min(1).max(60),
   codigoBarras: z
     .string()
-    .regex(/^\d{8,14}$/, 'GTIN/EAN deve ter entre 8 e 14 dígitos')
+    .regex(/^\d{8}$|^\d{12,14}$/, 'GTIN/EAN deve ter 8, 12, 13 ou 14 dígitos')
+    .refine(isValidGtin, 'GTIN/EAN inválido — dígito verificador não confere')
     .optional()
     .nullable(),
   descricao: z.string().min(2).max(300),

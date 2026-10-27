@@ -267,11 +267,12 @@ function CreateProductForm(): React.ReactElement {
                   <Input required value={form.codigo} onChange={(e) => setField('codigo', e.target.value)} />
                 </div>
                 <div className="space-y-1.5 md:col-span-2">
-                  <Label className="text-xs">GTIN/EAN (opcional)</Label>
+                  <Label className="text-xs">GTIN/EAN — código de barras (opcional)</Label>
                   <Input
                     value={form.codigoBarras}
-                    onChange={(e) => setField('codigoBarras', e.target.value)}
-                    placeholder="8 a 14 dígitos"
+                    inputMode="numeric"
+                    onChange={(e) => setField('codigoBarras', e.target.value.replace(/\D/g, ''))}
+                    placeholder="8, 12, 13 ou 14 dígitos — vazio = SEM GTIN"
                     maxLength={14}
                   />
                 </div>
@@ -504,6 +505,7 @@ function EditProductForm({ productId }: { productId: string }): React.ReactEleme
   });
 
   const [edit, setEdit] = useState({
+    codigoBarras: '',
     descricao: '',
     ncm: '',
     cest: '',
@@ -519,6 +521,7 @@ function EditProductForm({ productId }: { productId: string }): React.ReactEleme
     if (!detailsQuery.data) return;
     const p = detailsQuery.data.product;
     setEdit({
+      codigoBarras: p.codigoBarras ?? '',
       descricao: p.descricao,
       ncm: p.ncm,
       cest: p.cest ?? '',
@@ -544,6 +547,7 @@ function EditProductForm({ productId }: { productId: string }): React.ReactEleme
   const updateMutation = useMutation({
     mutationFn: () =>
       updateProduct(productId, {
+        codigoBarras: edit.codigoBarras || null,
         descricao: edit.descricao,
         ncm: edit.ncm,
         cest: edit.cest || null,
@@ -626,6 +630,16 @@ function EditProductForm({ productId }: { productId: string }): React.ReactEleme
                 <div className="col-span-2 space-y-1">
                   <Label>Descrição</Label>
                   <Input value={edit.descricao} onChange={(e) => setEdit((f) => ({ ...f, descricao: e.target.value }))} />
+                </div>
+                <div className="col-span-2 space-y-1">
+                  <Label>GTIN/EAN — código de barras (opcional)</Label>
+                  <Input
+                    value={edit.codigoBarras}
+                    inputMode="numeric"
+                    maxLength={14}
+                    placeholder="8, 12, 13 ou 14 dígitos — vazio = SEM GTIN"
+                    onChange={(e) => setEdit((f) => ({ ...f, codigoBarras: e.target.value.replace(/\D/g, '') }))}
+                  />
                 </div>
                 <div className="space-y-1">
                   <Label>NCM (8 dígitos)</Label>

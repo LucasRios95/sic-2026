@@ -16,6 +16,7 @@ import { CertificateAccessor } from '@shared/container/providers/CertificateVaul
 import { BusinessRuleError, IntegrationError, NotFoundError } from '@shared/errors';
 import { logger } from '@shared/logger';
 import { IndicadorIntermediador, IndicadorPresenca } from '@shared/types/fiscal-enums';
+import { isValidGtin } from '@shared/utils/document-validators';
 
 import { buildNfeProcXml } from '../../domain/authorized-xml';
 import { ChaveAcesso } from '../../domain/ChaveAcesso';
@@ -243,6 +244,14 @@ export class EmitirNFeUseCase {
       const taxRule = aplicarOverrideIcms(taxRuleVigente, item, company.crt, product.codigo);
       // Valida a regra EFETIVA (já com o override) contra os erros de configuração comuns.
       errosTributacao.push(...validarTributacaoItem(taxRule, company.crt, product.codigo));
+      // GTIN vindo de importação legada não passou pelo validador do cadastro — a SEFAZ
+      // rejeita a nota inteira por DV errado, então barramos aqui com mensagem clara.
+      if (product.codigoBarras && !isValidGtin(product.codigoBarras)) {
+        errosTributacao.push(
+          `Produto ${product.codigo}: GTIN/EAN "${product.codigoBarras}" inválido — ` +
+            'corrija ou remova o código de barras no cadastro do produto.',
+        );
+      }
       itensCtx.push({
         itemId: `item-${item.numeroItem}`,
         productId: product.id,
@@ -364,7 +373,7 @@ export class EmitirNFeUseCase {
       },
       itensCtx.map((it, idx) => {
         const r = calculo.itens[idx];
-        const src = (it as unknown as { __sourceItem: typeof request.itens[number] & { product: { codigo: string; descricao: string; ncm: string; cest?: string | null }; taxRule: { cstIcms?: string | null; csosnIcms?: string | null; cstIcmsSt?: string | null; cstIpi?: string | null; cstPis?: string | null; cstCofins?: string | null; }; }; }).__sourceItem;
+        const src = (it as unknown as { __sourceItem: typeof request.itens[number] & { product: { codigo: string; descricao: string; ncm: string; cest?: string | null; origem: number }; taxRule: { cstIcms?: string | null; csosnIcms?: string | null; cstIcmsSt?: string | null; cstIpi?: string | null; cstPis?: string | null; cstCofins?: string | null; }; }; }).__sourceItem;
         const tr = src.taxRule;
         return {
           numeroItem: src.numeroItem,
@@ -382,6 +391,8 @@ export class EmitirNFeUseCase {
           valorSeguro: src.valorSeguro ?? '0',
           valorOutros: src.valorOutros ?? '0',
           productId: src.productId,
+          // O DANFE compõe o CST exibido como origem + CST/CSOSN a partir deste campo.
+          origemMercadoria: src.product.origem,
           // tributos — CSTs vêm da regra tributária vigente; valores do MotorTributario.
           cstIcms: tr.cstIcms ?? null,
           csosnIcms: tr.csosnIcms ?? null,
@@ -735,7 +746,7 @@ export class EmitirNFeUseCase {
     customer: NonNullable<Awaited<ReturnType<ICustomerRepository['findById']>>>,
     request: EmitirNFeRequest,
     calculo: Awaited<ReturnType<MotorTributario['calcular']>>,
-    itensCtx: { __sourceItem: EmitirNFeRequest['itens'][number] & { product: { codigo: string; descricao: string; ncm: string; cest?: string | null }; descricao?: string; taxRule: { cstIcms?: string | null; csosnIcms?: string | null; cstIcmsSt?: string | null; cstIpi?: string | null; cEnq?: string | null; cstPis?: string | null; cstCofins?: string | null; modBC?: number | null; pRedBC?: string | null; } } }[],
+    itensCtx: { __sourceItem: EmitirNFeRequest['itens'][number] & { product: { codigo: string; codigoBarras?: string | null; descricao: string; ncm: string; cest?: string | null; origem: number }; descricao?: string; taxRule: { cstIcms?: string | null; csosnIcms?: string | null; cstIcmsSt?: string | null; cstIpi?: string | null; cEnq?: string | null; cstPis?: string | null; cstCofins?: string | null; modBC?: number | null; pRedBC?: string | null; } } }[],
     formaEmissao: FormaEmissao,
   ): NFeDocument {
     const operacaoInterestadual = customer.uf !== company.uf;
@@ -823,6 +834,8 @@ export class EmitirNFeUseCase {
         return {
           numero: src.numeroItem,
           codigo: src.product.codigo,
+          // Sem GTIN cadastrado o builder emite "SEM GTIN" em cEAN/cEANTrib.
+          ean: src.product.codigoBarras || null,
           descricao: src.descricao ?? src.product.descricao,
           ncm: src.product.ncm,
           cest: src.product.cest ?? null,
@@ -838,7 +851,8 @@ export class EmitirNFeUseCase {
           unidadeTributavel: src.unidadeComercial,
           quantidadeTributavel: src.quantidade,
           valorUnitarioTrib: src.valorUnitario,
-          origem: 0,
+          // Mesma origem usada pelo motor (alíquota interestadual de 4% para importados).
+          origem: src.product.origem,
           cstIcms: tr.cstIcms ?? undefined,
           csosnIcms: tr.csosnIcms ?? undefined,
           modBC: tr.modBC ?? undefined,

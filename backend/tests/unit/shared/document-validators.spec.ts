@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { isValidCnpj, isValidCpf, normalizeDigits } from '@shared/utils/document-validators';
+import {
+  isValidCnpj,
+  isValidCpf,
+  isValidGtin,
+  normalizeDigits,
+} from '@shared/utils/document-validators';
 
 describe('isValidCnpj', () => {
   it('aceita CNPJ válido com e sem máscara', () => {
@@ -26,6 +31,21 @@ describe('isValidCpf', () => {
     expect(isValidCpf('123')).toBe(false);
     expect(isValidCpf('11111111111')).toBe(false);
     expect(isValidCpf('52998224700')).toBe(false);
+  });
+});
+
+describe('isValidGtin', () => {
+  it('aceita GTIN-8, GTIN-12, GTIN-13 e GTIN-14 com DV correto', () => {
+    expect(isValidGtin('96385074')).toBe(true);
+    expect(isValidGtin('036000291452')).toBe(true);
+    expect(isValidGtin('7891000315507')).toBe(true);
+    expect(isValidGtin('17891000315504')).toBe(true);
+  });
+
+  it('rejeita tamanhos fora do XSD, zeros e DV inválido', () => {
+    expect(isValidGtin('1234567890')).toBe(false); // 10 dígitos
+    expect(isValidGtin('00000000')).toBe(false);
+    expect(isValidGtin('7891000315508')).toBe(false);
   });
 });
 

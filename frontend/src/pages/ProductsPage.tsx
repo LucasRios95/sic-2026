@@ -144,6 +144,7 @@ export function ProductsPage(): React.ReactElement {
                 </div>
                 <div className="mt-3 pt-3 border-t border-border space-y-1 text-xs">
                   <Row label="NCM" value={p.ncm} mono />
+                  <Row label="EAN" value={p.codigoBarras || 'SEM GTIN'} mono />
                   <Row label="Unidade" value={p.unidadeComercial} />
                   <Row label="Origem" value={String(p.origem)} />
                 </div>

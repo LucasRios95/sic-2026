@@ -1,5 +1,5 @@
 /**
- * Validação de CNPJ e CPF com os dois dígitos verificadores conforme algoritmo oficial.
+ * Validação de CNPJ, CPF e GTIN com os dígitos verificadores conforme algoritmo oficial.
  * Aceitam entrada com ou sem máscara; o valor persistido é sempre só dígitos.
  */
 
@@ -29,6 +29,25 @@ export function isValidCpf(value: string): boolean {
   const d1 = calcDigit(cpf.slice(0, 9), w1);
   const d2 = calcDigit(cpf.slice(0, 9) + d1, w2);
   return cpf.endsWith(`${d1}${d2}`);
+}
+
+/**
+ * GTIN (EAN/UPC) — códigos de barras aceitos no cEAN/cEANTrib da NF-e.
+ * O XSD só admite 8, 12, 13 ou 14 dígitos; a SEFAZ ainda confere o dígito verificador
+ * GS1 (pesos 3,1,3,… a partir da direita, excluindo o próprio DV).
+ */
+export function isValidGtin(value: string): boolean {
+  const gtin = normalizeDigits(value);
+  if (![8, 12, 13, 14].includes(gtin.length)) return false;
+  if (/^0+$/.test(gtin)) return false;
+
+  const body = gtin.slice(0, -1);
+  const sum = body
+    .split('')
+    .reverse()
+    .reduce((acc, ch, i) => acc + Number(ch) * (i % 2 === 0 ? 3 : 1), 0);
+  const dv = (10 - (sum % 10)) % 10;
+  return Number(gtin.slice(-1)) === dv;
 }
 
 function calcDigit(base: string, weights: number[]): number {
