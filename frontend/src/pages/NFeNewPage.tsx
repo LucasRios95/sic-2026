@@ -30,7 +30,12 @@ import {
   contarAjustes,
   type AjustesDigitados,
 } from '@/features/nfe/tax-review';
-import { getProduct, listProducts } from '@/features/products/products-api';
+import {
+  getProduct,
+  getProductWithTaxRules,
+  listProducts,
+  type ProductTaxRule,
+} from '@/features/products/products-api';
 import { ApiError } from '@/lib/api';
 import { formatDecimal, parseDecimal, toDecimalInput } from '@/lib/format';
 import { Badge } from '@/shared/components/ui/Badge';
@@ -125,6 +130,22 @@ function linhaCalculavel(it: ItemRow): boolean {
     decimalApiValido(it.valorUnitario) &&
     /^\d{4}$/.test(it.cfop)
   );
+}
+
+/**
+ * CSOSN (Simples) ou CST (Normal) da regra tributária vigente hoje — sugestão inicial do
+ * campo do item. Código fora da lista da tela (ou regra do outro regime) fica vazio, e o
+ * item usa o "padrão do produto" no backend.
+ */
+function codigoIcmsDaRegra(
+  regras: ProductTaxRule[],
+  isSimples: boolean,
+  opcoes: ReadonlyArray<[string, string]>,
+): string {
+  const agora = new Date().toISOString();
+  const vigente = regras.find((r) => r.validFrom <= agora && (!r.validTo || r.validTo > agora));
+  const codigo = (isSimples ? vigente?.csosnIcms : vigente?.cstIcms)?.trim() ?? '';
+  return opcoes.some(([cod]) => cod === codigo) ? codigo : '';
 }
 
 /** CSOSN (Simples Nacional) — código + descrição curta. */
@@ -861,18 +882,30 @@ export function NFeNewPage(): React.ReactElement {
       updateItem(rowId, { productId: '' });
       return;
     }
-    // Garante que temos o produto no cache (preenchido pelo combobox normalmente,
-    // mas pode faltar se o id veio de outra fonte).
+    // Busca produto + regras: a regra vigente sugere o CSOSN/CST do item. Se falhar, o
+    // item segue com o produto do cache e o código fica no "padrão do produto".
     let product = productCacheRef.current[productId];
-    if (!product) {
-      product = await getProduct(productId);
+    let icmsCodigo = '';
+    try {
+      const completo = await getProductWithTaxRules(productId);
+      product = completo.product;
+      icmsCodigo = codigoIcmsDaRegra(completo.taxRules, isSimples, icmsOpcoes);
+    } catch (err) {
+      if (!product) throw err;
+    }
+    if (!productCacheRef.current[productId]) {
       productCacheRef.current[productId] = product;
       setProductCacheVersion((v) => v + 1);
     }
     const baseCfop =
       tipoOperacao === 'SAIDA' ? product.cfopPadraoSaida : product.cfopPadraoEntrada;
-    // Ajustes de imposto eram do produto anterior — não fazem sentido no novo.
-    updateItem(rowId, { productId, ajustes: {}, ...(baseCfop ? { cfop: baseCfop } : {}) });
+    // Ajustes de imposto e o código de ICMS eram do produto anterior — não valem no novo.
+    updateItem(rowId, {
+      productId,
+      ajustes: {},
+      icmsCodigo,
+      ...(baseCfop ? { cfop: baseCfop } : {}),
+    });
   }
 
   function removeItem(id: string): void {
@@ -1232,7 +1265,7 @@ export function NFeNewPage(): React.ReactElement {
                 <Select
                   value={row.icmsCodigo}
                   onChange={(e) => updateItem(row.id, { icmsCodigo: e.target.value })}
-                  title={`${icmsLabel} de ICMS — vazio usa o código da regra do produto`}
+                  title={`${icmsLabel} de ICMS — vem da regra do produto; altere se a operação pedir outro`}
                 >
                   <option value="">— padrão do produto —</option>
                   {icmsOpcoes.map(([cod, label]) => (
