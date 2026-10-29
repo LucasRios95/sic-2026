@@ -2,12 +2,14 @@ import { inject, injectable } from 'tsyringe';
 
 import { Money } from '@shared/domain/Money';
 
+import { CalculadoraCreditoSimples } from './calculadoras/CalculadoraCreditoSimples';
 import { CalculadoraDifal, CalculadoraFcpDestino } from './calculadoras/CalculadoraDifal';
 import { CalculadoraIbsCbs } from './calculadoras/CalculadoraIbsCbs';
 import { CalculadoraIcmsProprio } from './calculadoras/CalculadoraIcmsProprio';
 import { CalculadoraIcmsSt } from './calculadoras/CalculadoraIcmsSt';
 import { CalculadoraIpi } from './calculadoras/CalculadoraIpi';
 import { CalculadoraPisCofins } from './calculadoras/CalculadoraPisCofins';
+import { CalculadoraTributosAproximados } from './calculadoras/CalculadoraTributosAproximados';
 import { ContextoCalculo, ItemContexto } from './domain/ContextoCalculo';
 import { ICalculadoraTributo } from './domain/ICalculadoraTributo';
 import {
@@ -20,13 +22,17 @@ import {
 /**
  * Pipeline orquestrador. Aplica as calculadoras em ordem fixa:
  *
- *   1. ICMS próprio       (base para o cálculo de ST)
- *   2. ICMS-ST            (depende do ICMS próprio na fórmula)
- *   3. DIFAL              (independente, mas só em B2C interestadual)
- *   4. FCP destino        (acompanha DIFAL)
- *   5. IPI
- *   6. PIS / COFINS       (até 2026; extinto a partir de 2027)
- *   7. IBS / CBS          (ano-teste 2026 / pleno 2027+)
+ *   1. IPI                (integra a base do ICMS p/ consumidor final e a base da ST)
+ *   2. ICMS próprio       (deduzido no cálculo de ST)
+ *   3. ICMS-ST            (depende do ICMS próprio e do IPI na fórmula)
+ *   4. DIFAL              (só em interestadual para consumidor final não contribuinte)
+ *   5. FCP destino        (acompanha DIFAL)
+ *   6. Crédito Simples    (pCredSN/vCredICMSSN — CSOSN 101/201/900)
+ *   7. PIS / COFINS       (até 2026; base sem o ICMS destacado — Tema 69/STF)
+ *   8. IBS / CBS          (ano-teste 2026 / pleno 2027+)
+ *   9. Tributos aprox.    (vTotTrib, Lei 12.741 — soma o que os anteriores apuraram)
+ *
+ * Cada calculadora recebe o resultado parcial das anteriores (somente leitura).
  *
  * Princípio: o motor é IDEMPOTENTE — mesmo contexto produz mesmo resultado, sem
  * efeitos colaterais. Toda configuração faltante vira `warnings` no resultado,
@@ -47,8 +53,20 @@ export class MotorTributario {
     @inject(CalculadoraIpi) ipi: CalculadoraIpi,
     @inject(CalculadoraPisCofins) pisCofins: CalculadoraPisCofins,
     @inject(CalculadoraIbsCbs) ibsCbs: CalculadoraIbsCbs,
+    @inject(CalculadoraCreditoSimples) creditoSimples: CalculadoraCreditoSimples,
+    @inject(CalculadoraTributosAproximados) tributosAproximados: CalculadoraTributosAproximados,
   ) {
-    this.calculadoras = [icmsProprio, icmsSt, difal, fcpDestino, ipi, pisCofins, ibsCbs];
+    this.calculadoras = [
+      ipi,
+      icmsProprio,
+      icmsSt,
+      difal,
+      fcpDestino,
+      creditoSimples,
+      pisCofins,
+      ibsCbs,
+      tributosAproximados,
+    ];
   }
 
   async calcular(contexto: ContextoCalculo): Promise<ResultadoCalculoDocumento> {
@@ -76,13 +94,22 @@ export class MotorTributario {
     const result: ResultadoCalculoItem = {
       itemId: item.itemId,
       valorTotal,
+      calculadorasAplicadas: [],
+      codigos: {
+        cstIcms: item.taxRule.cstIcms ?? null,
+        csosnIcms: item.taxRule.csosnIcms ?? null,
+        cstIpi: item.taxRule.cstIpi ?? null,
+        cstPis: item.taxRule.cstPis ?? null,
+        cstCofins: item.taxRule.cstCofins ?? null,
+      },
       memoria: [],
       warnings: [],
     };
 
     for (const calc of this.calculadoras) {
       if (!calc.aplica(contexto, item)) continue;
-      const slice = await calc.calcular(contexto, item);
+      result.calculadorasAplicadas.push(calc.nome);
+      const slice = await calc.calcular(contexto, item, result);
       Object.assign(result, slice.campos);
       if (slice.passo) result.memoria.push(slice.passo as PassoMemoria);
       if (slice.warnings?.length) result.warnings.push(...slice.warnings);
@@ -98,9 +125,9 @@ export class MotorTributario {
     const sum = (selector: (i: ResultadoCalculoItem) => string | undefined): Money =>
       itens.reduce((acc, i) => acc.add(selector(i) ?? 0), Money.zero());
 
-    const valorProdutos = contexto.itens
-      .reduce((acc, i) => acc.add(new Money(i.quantidade).mul(i.valorUnitario)), Money.zero())
-      .round(2);
+    // vProd do total = soma dos vProd JÁ ARREDONDADOS dos itens. Somar qtd × unit. sem
+    // arredondar e arredondar no fim diverge em centavos com vários itens (cStat 564).
+    const valorProdutos = sum((i) => i.valorTotal).round(2);
     const valorDesconto = contexto.itens
       .reduce((acc, i) => acc.add(i.valorDesconto ?? 0), Money.zero())
       .round(2);
@@ -136,8 +163,10 @@ export class MotorTributario {
       valorSeguro: valorSeguro.toString(2),
       valorOutros: valorOutros.toString(2),
       valorTotal: valorTotal.toString(2),
+      baseIcms: sum((i) => i.baseIcms).round(2).toString(2),
       valorIcms: sum((i) => i.valorIcms).round(2).toString(2),
       valorIcmsDeson: sum((i) => i.valorIcmsDeson).round(2).toString(2),
+      baseIcmsST: sum((i) => i.baseIcmsST).round(2).toString(2),
       valorIcmsST: valorIcmsST.toString(2),
       valorFCP: sum((i) => i.valorFCP).round(2).toString(2),
       valorICMSUFDest: sum((i) => i.valorICMSUFDest).round(2).toString(2),
@@ -151,6 +180,10 @@ export class MotorTributario {
       valorCbs: sum((i) => i.valorCbs).round(2).toString(2),
       valorIs: sum((i) => i.valorIs).round(2).toString(2),
       modoAnoTesteIbsCbs,
+      valorCredSN: sum((i) => i.valorCredSN).round(2).toString(2),
+      valorTotTrib: sum((i) => i.valorTotTrib).round(2).toString(2),
+      valorTotTribFederal: sum((i) => i.valorTotTribFederal).round(2).toString(2),
+      valorTotTribEstadual: sum((i) => i.valorTotTribEstadual).round(2).toString(2),
     };
   }
 }

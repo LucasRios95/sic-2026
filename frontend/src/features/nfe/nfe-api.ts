@@ -94,6 +94,27 @@ export interface EmitirNFeItemPayload {
    */
   cstIcms?: string;
   csosnIcms?: string;
+  /** Base/alíquota conferidas no modal "Impostos". Omitido = cálculo automático. */
+  ajustes?: AjustesTributarios;
+}
+
+/**
+ * Ajustes manuais por tributo (decimais com PONTO, como toda a API). Espelha o
+ * `AjustesTributariosItem` do motor: cada campo informado substitui o valor resolvido e o
+ * backend recalcula valor = base × alíquota. Só vale para tributos que se aplicam ao item.
+ */
+export interface AjustesTributarios {
+  /** `pDif` = % de diferimento (só CST 51). */
+  icms?: { base?: string; aliquota?: string; pDif?: string };
+  icmsSt?: { base?: string; aliquota?: string; mva?: string };
+  ipi?: { base?: string; aliquota?: string };
+  pis?: { base?: string; aliquota?: string };
+  cofins?: { base?: string; aliquota?: string };
+  difal?: { base?: string; aliquotaDestino?: string; aliquotaInterestadual?: string };
+  fcpDestino?: { aliquota?: string };
+  ibsCbs?: { base?: string; aliquotaIbs?: string; aliquotaCbs?: string };
+  /** Crédito de ICMS do Simples (CSOSN 101/201/900). */
+  creditoSn?: { base?: string; aliquota?: string };
 }
 
 export type TipoOperacao = 'ENTRADA' | 'SAIDA';
@@ -430,6 +451,9 @@ export interface SimulateTaxPayload {
     valorDesconto?: string;
     valorFrete?: string;
     cfop: string;
+    cstIcms?: string;
+    csosnIcms?: string;
+    ajustes?: AjustesTributarios;
   }>;
 }
 

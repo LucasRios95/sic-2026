@@ -6,7 +6,7 @@ import { ICompanyRepository } from '@modules/Companies/repositories/ICompanyRepo
 import { ICustomerRepository } from '@modules/Customers/repositories/ICustomerRepository';
 import { IProductRepository } from '@modules/Products/repositories/IProductRepository';
 import { IProductTaxRuleRepository } from '@modules/Products/repositories/IProductTaxRuleRepository';
-import { ContextoCalculo } from '@modules/TaxEngine/domain/ContextoCalculo';
+import { AjustesTributariosItem, ContextoCalculo } from '@modules/TaxEngine/domain/ContextoCalculo';
 import { MotorTributario } from '@modules/TaxEngine/MotorTributario';
 import { NotFoundError } from '@shared/errors';
 import { logger } from '@shared/logger';
@@ -20,6 +20,7 @@ import { NFeItem } from '../../infra/typeorm/entities/NFeItem';
 import {
   aplicarOverrideIcms,
   appendCustomerInfoToInfCpl,
+  appendInfoTributariaToInfCpl,
 } from '../EmitirNFe/EmitirNFeUseCase';
 
 /**
@@ -124,6 +125,7 @@ export class PreviewDanfeUseCase {
               company.crt,
               r.product.codigo,
             ),
+            ajustes: r.item.ajustes,
           })),
         };
         calculo = await this.motorTributario.calcular(contexto);
@@ -189,16 +191,25 @@ export class PreviewDanfeUseCase {
       valorDesconto: t?.valorDesconto ?? '0.00',
       valorOutros: t?.valorOutros ?? '0.00',
       valorTotal: t?.valorTotal ?? somaProdutos,
-      baseIcms: '0.00',
+      baseIcms: t?.baseIcms ?? '0.00',
       valorIcms: t?.valorIcms ?? '0.00',
-      baseIcmsST: '0.00',
+      baseIcmsST: t?.baseIcmsST ?? '0.00',
       valorIcmsST: t?.valorIcmsST ?? '0.00',
       valorIpi: t?.valorIpi ?? '0.00',
       baseIbsCbs: t?.baseIbsCbs ?? '0.00',
       valorIbs: t?.valorIbs ?? '0.00',
       valorCbs: t?.valorCbs ?? '0.00',
       valorIs: t?.valorIs ?? '0.00',
-      infCpl: appendCustomerInfoToInfCpl(request.infCpl, customer) ?? null,
+      // Mesma composição da emissão: dados do cliente + textos legais do cálculo.
+      infCpl:
+        (calculo
+          ? appendInfoTributariaToInfCpl(
+              appendCustomerInfoToInfCpl(request.infCpl, customer),
+              calculo,
+              company.crt,
+            )
+          : appendCustomerInfoToInfCpl(request.infCpl, customer)) ?? null,
+      valorTotTrib: t?.valorTotTrib ?? '0.00',
       infAdFisco: null,
       items,
     } as unknown as NFe & { items: NFeItem[] };
@@ -290,6 +301,7 @@ export interface PreviewDanfeItemInput {
   valorFrete?: string;
   cstIcms?: string;
   csosnIcms?: string;
+  ajustes?: AjustesTributariosItem;
 }
 
 export interface PreviewDanfeRequest {

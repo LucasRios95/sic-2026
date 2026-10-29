@@ -67,7 +67,10 @@ export class CertificateInspector {
       subject,
       commonName,
       cnpjTitular,
-      serialNumber: cert.serialNumber,
+      // node-forge devolve o serial em hex minúsculo; normalizamos para maiúsculo, que é
+      // como o OpenSSL e os visualizadores de certificado do Windows exibem — assim o
+      // valor guardado bate com o que o usuário vê ao conferir o certificado.
+      serialNumber: cert.serialNumber.toUpperCase(),
       thumbprint,
       validFrom: cert.validity.notBefore,
       validTo: cert.validity.notAfter,

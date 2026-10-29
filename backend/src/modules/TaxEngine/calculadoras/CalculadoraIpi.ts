@@ -1,20 +1,28 @@
 import { injectable } from 'tsyringe';
 
+import { CodigoRegimeTributario } from '@modules/Companies/infra/typeorm/entities/Company';
 import { Money } from '@shared/domain/Money';
 
 import { ContextoCalculo, ItemContexto } from '../domain/ContextoCalculo';
 import { CalculadoraSlice, ICalculadoraTributo } from '../domain/ICalculadoraTributo';
-import { baseDefaultItem } from '../domain/item-utils';
+import { ajusteOu, baseDefaultItem, temAjuste } from '../domain/item-utils';
+
+/** CSTs de IPI cujo grupo é IPITrib (com vBC/pIPI/vIPI) — mesma regra do NFeXmlBuilder. */
+const CST_IPI_TRIBUTADO = ['00', '49', '50', '99'];
 
 /**
  * Calculadora de IPI. Suporta dois modos:
  *  - Padrão: valor = base × aliqIpi
  *  - Por unidade: valor = quantidade × vUnidIpi (cigarros, bebidas, IPI ad valorem)
  *
- * Apenas empresas com `usaIpi = true` rodam — caso típico de indústria/equiparada.
+ * Apenas empresas do Regime Normal com `usaIpi = true` rodam — caso típico de
+ * indústria/equiparada. Simples Nacional não destaca IPI (o builder suprime o grupo no
+ * item); calcular aqui faria o vIPI/vNF do total divergir dos itens.
  *
  * IPI suspenso/isento/não-tributado: o CST em si controla o que vai no XML; o motor
  * apenas computa quando há alíquota efetiva (> 0).
+ *
+ * Ajustes manuais (`item.ajustes.ipi`) valem só no modo percentual.
  */
 @injectable()
 export class CalculadoraIpi implements ICalculadoraTributo {
@@ -22,6 +30,7 @@ export class CalculadoraIpi implements ICalculadoraTributo {
 
   aplica(contexto: ContextoCalculo, item: ItemContexto): boolean {
     if (!contexto.empresa.flags.usaIpi) return false;
+    if (contexto.empresa.crt !== CodigoRegimeTributario.REGIME_NORMAL) return false;
     return Boolean(item.taxRule.cstIpi);
   }
 
@@ -50,32 +59,43 @@ export class CalculadoraIpi implements ICalculadoraTributo {
       };
     }
 
-    if (!rule.aliqIpi) {
+    const ajuste = item.ajustes?.ipi;
+    // Só CST tributado (IPITrib) leva vIPI no XML; nos demais (IPINT) um valor calculado
+    // iria para o vIPI/vNF do total sem existir no item.
+    const tributado = CST_IPI_TRIBUTADO.includes(rule.cstIpi ?? '');
+    const aliqResolvida = rule.aliqIpi ? new Money(rule.aliqIpi) : null;
+    const aliq = tributado ? ajusteOu(ajuste?.aliquota, aliqResolvida) : null;
+    if (!aliq) {
       // CST de IPI presente mas sem alíquota → CST de não-tributação (ex.: 53, 54, 55).
       return {
         campos: {},
         passo: {
           calculadora: this.nome,
           resumo: `IPI CST ${rule.cstIpi} sem alíquota — não tributado`,
-          detalhe: { cstIpi: rule.cstIpi },
+          detalhe: { cstIpi: rule.cstIpi ?? null },
         },
         warnings,
       };
     }
 
-    const base = baseDefaultItem(item);
-    const aliq = new Money(rule.aliqIpi);
+    const base = ajusteOu(ajuste?.base, baseDefaultItem(item)).round(2);
     const valor = base.applyPercent(aliq);
+    const manual = temAjuste(ajuste);
     return {
       campos: {
-        baseIpi: base.round(2).toString(2),
+        baseIpi: base.toString(2),
         aliqIpi: aliq.round(4).toString(4),
         valorIpi: valor.round(2).toString(2),
       },
       passo: {
         calculadora: this.nome,
-        resumo: `IPI padrão: base × ${aliq.toString(4)}%`,
-        detalhe: { modo: 'percentual', base: base.round(2).toString(2), aliq: aliq.toString(4) },
+        resumo: `IPI padrão: base × ${aliq.toString(4)}%${manual ? ' (ajustado manualmente)' : ''}`,
+        detalhe: {
+          modo: 'percentual',
+          base: base.toString(2),
+          aliq: aliq.toString(4),
+          ajusteManual: manual,
+        },
       },
       warnings,
     };

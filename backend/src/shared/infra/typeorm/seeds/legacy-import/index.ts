@@ -419,8 +419,10 @@ async function importProducts(
       continue;
     }
 
-    // codigo: usa o ID legado prefixado para evitar colisão com cadastros novos
-    const codigo = `LEG-${p.id}`;
+    // codigo: o ID legado (PK_CODPRODUTO) é o próprio código do produto no sistema
+    // antigo. Vai sem prefixo — é ele que a contabilidade usa pra casar o cProd do
+    // XML com o cadastro dela.
+    const codigo = legacyId;
 
     // UPSERT: atualiza descrição/NCM em re-runs (caso o primeiro tenha gerado mojibake)
     const upserted = await appDataSource.query<Array<{ id: string; xmax: string }>>(

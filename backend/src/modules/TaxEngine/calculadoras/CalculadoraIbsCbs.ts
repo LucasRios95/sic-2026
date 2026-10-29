@@ -4,7 +4,7 @@ import { Money } from '@shared/domain/Money';
 
 import { ContextoCalculo, ItemContexto } from '../domain/ContextoCalculo';
 import { CalculadoraSlice, ICalculadoraTributo } from '../domain/ICalculadoraTributo';
-import { baseDefaultItem } from '../domain/item-utils';
+import { ajusteOu, baseDefaultItem, temAjuste } from '../domain/item-utils';
 import { ITaxParameterRepository } from '../repositories/ITaxParameterRepository';
 
 /**
@@ -88,11 +88,13 @@ export class CalculadoraIbsCbs implements ICalculadoraTributo {
     const cbsCfg = cbsParam.valor as { aliquota: string; modo?: 'ANO_TESTE' | 'PLENO' };
     const modoAnoTeste = ibsCfg.modo === 'ANO_TESTE' || cbsCfg.modo === 'ANO_TESTE';
 
-    // Alíquota efetiva: produto sobrescreve global.
-    const aliqIbs = new Money(rule.aliqIbsProduto ?? ibsCfg.aliquota);
-    const aliqCbs = new Money(rule.aliqCbsProduto ?? cbsCfg.aliquota);
+    // Alíquota efetiva: ajuste manual > produto > global.
+    const ajuste = item.ajustes?.ibsCbs;
+    const manual = temAjuste(ajuste);
+    const aliqIbs = ajusteOu(ajuste?.aliquotaIbs, new Money(rule.aliqIbsProduto ?? ibsCfg.aliquota));
+    const aliqCbs = ajusteOu(ajuste?.aliquotaCbs, new Money(rule.aliqCbsProduto ?? cbsCfg.aliquota));
 
-    const base = baseDefaultItem(item);
+    const base = ajusteOu(ajuste?.base, baseDefaultItem(item)).round(2);
     const valorIbs = base.applyPercent(aliqIbs);
     const valorCbs = base.applyPercent(aliqCbs);
 
@@ -100,7 +102,7 @@ export class CalculadoraIbsCbs implements ICalculadoraTributo {
       campos: {
         cstIbsCbs: rule.cstIbsCbs ?? undefined,
         ...(rule.cClassTrib ? { cClassTrib: rule.cClassTrib } : {}),
-        baseIbsCbs: base.round(2).toString(2),
+        baseIbsCbs: base.toString(2),
         aliqIbs: aliqIbs.round(4).toString(4),
         valorIbs: valorIbs.round(2).toString(2),
         aliqCbs: aliqCbs.round(4).toString(4),
@@ -109,16 +111,27 @@ export class CalculadoraIbsCbs implements ICalculadoraTributo {
       },
       passo: {
         calculadora: this.nome,
-        resumo: modoAnoTeste
-          ? `IBS/CBS ano-teste 2026: base × (IBS ${aliqIbs.toString(4)}% + CBS ${aliqCbs.toString(4)}%) — sem recolhimento`
-          : `IBS/CBS pleno: base × (IBS ${aliqIbs.toString(4)}% + CBS ${aliqCbs.toString(4)}%)`,
+        resumo:
+          (modoAnoTeste
+            ? `IBS/CBS ano-teste 2026: base × (IBS ${aliqIbs.toString(4)}% + CBS ${aliqCbs.toString(4)}%) — sem recolhimento`
+            : `IBS/CBS pleno: base × (IBS ${aliqIbs.toString(4)}% + CBS ${aliqCbs.toString(4)}%)`) +
+          (manual ? ' (ajustado manualmente)' : ''),
         detalhe: {
           modo: modoAnoTeste ? 'ANO_TESTE' : 'PLENO',
           ufDestino: contexto.destinatario.uf,
           aliqIbs: aliqIbs.toString(4),
           aliqCbs: aliqCbs.toString(4),
-          fonteAliqIbs: rule.aliqIbsProduto ? 'produto' : 'parametro-global',
-          fonteAliqCbs: rule.aliqCbsProduto ? 'produto' : 'parametro-global',
+          fonteAliqIbs: ajuste?.aliquotaIbs
+            ? 'ajuste-manual'
+            : rule.aliqIbsProduto
+              ? 'produto'
+              : 'parametro-global',
+          fonteAliqCbs: ajuste?.aliquotaCbs
+            ? 'ajuste-manual'
+            : rule.aliqCbsProduto
+              ? 'produto'
+              : 'parametro-global',
+          ajusteManual: manual,
         },
       },
       warnings,

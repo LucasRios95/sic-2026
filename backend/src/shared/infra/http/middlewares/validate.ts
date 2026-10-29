@@ -15,6 +15,19 @@ interface Schemas {
  * exatamente onde corrigir.
  */
 export function validate(schemas: Schemas) {
+  // Fail-fast no wiring das rotas: `validate({ body: algoQueNãoExiste })` — um import
+  // quebrado, um schema renomeado — passaria batido, porque o `if (schemas.body)` abaixo
+  // é falsy e a rota simplesmente rodaria SEM validação. Como o backend roda via tsx (sem
+  // type-check), o tsc não barra isso no deploy. Melhor derrubar o boot do que servir uma
+  // rota fiscal aceitando qualquer payload.
+  for (const parte of ['body', 'query', 'params'] as const) {
+    if (parte in schemas && !schemas[parte]) {
+      throw new Error(
+        `validate(): schema de "${parte}" está undefined — import quebrado ou schema inexistente.`,
+      );
+    }
+  }
+
   return (req: Request, _res: Response, next: NextFunction): void => {
     try {
       if (schemas.body) req.body = schemas.body.parse(req.body);
@@ -31,7 +44,19 @@ export function validate(schemas: Schemas) {
       next();
     } catch (err) {
       if (err && typeof err === 'object' && 'issues' in err) {
-        next(new ValidationError('Dados inválidos', (err as { flatten: () => unknown }).flatten()));
+        const zodErr = err as {
+          flatten: () => object;
+          issues: Array<{ path: Array<string | number>; message: string }>;
+        };
+        // `flatten()` colapsa arrays: um item inválido dentro de `itens` vira só
+        // { itens: ["..."] }, sem dizer QUAL item. Mandamos junto o caminho completo
+        // ("itens.6.valorUnitario") para o front conseguir apontar a linha exata.
+        next(
+          new ValidationError('Dados inválidos', {
+            ...zodErr.flatten(),
+            issues: zodErr.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+          }),
+        );
         return;
       }
       next(err);

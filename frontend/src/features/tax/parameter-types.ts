@@ -15,7 +15,10 @@ export type ParameterKind =
   | 'CBS_ALIQUOTA_PADRAO'
   | 'IBS_ALIQUOTA_UF'
   | 'IS_ALIQUOTA'
-  | 'PIS_COFINS_ENCERRAMENTO';
+  | 'PIS_COFINS_ENCERRAMENTO'
+  | 'DIFAL_BASE_DUPLA_UF'
+  | 'SIMPLES_CREDITO_ICMS'
+  | 'SIMPLES_ALIQUOTA_EFETIVA';
 
 export type ModoReforma = 'ANO_TESTE' | 'PLENO';
 
@@ -196,6 +199,59 @@ export const PARAMETER_TYPES: ParameterTypeDefinition[] = [
       }
     },
   },
+  {
+    kind: 'DIFAL_BASE_DUPLA_UF',
+    label: 'DIFAL com base dupla (por UF de destino)',
+    description:
+      'Liga o cálculo "por dentro" (base dupla) do DIFAL para venda a consumidor final não ' +
+      'contribuinte nesta UF de destino. Sem este parâmetro vale a base única do Convênio ' +
+      'ICMS 236/2021. Confirme na legislação da UF antes de ligar.',
+    icon: 'map-pin',
+    tone: 'warning',
+    fields: ['uf'],
+    buildChave: (f) => `difal.base_dupla.uf.${(f.uf ?? '').toUpperCase()}`,
+    buildValor: () => ({ ativo: true }),
+    detectKind: (chave) => chave.startsWith('difal.base_dupla.uf.'),
+    parseValor: (chave) => ({ uf: chave.replace('difal.base_dupla.uf.', '') }),
+    renderValue: (valor) => (asObj(valor).ativo === false ? 'Base única' : 'Base dupla'),
+  },
+  {
+    kind: 'SIMPLES_CREDITO_ICMS',
+    label: 'Crédito de ICMS do Simples (pCredSN)',
+    description:
+      'Alíquota de crédito de ICMS transferível ao cliente nas notas com CSOSN 101/201/900 ' +
+      '(LC 123/2006, art. 23) — o % de ICMS da faixa de receita do Simples. Use escopo da ' +
+      'empresa e atualize a vigência quando a faixa mudar.',
+    icon: 'percent',
+    tone: 'accent',
+    fields: ['aliquota'],
+    buildChave: () => 'simples.credito_icms.aliquota',
+    buildValor: (f) => ({ aliquota: f.aliquota }),
+    detectKind: (chave) => chave === 'simples.credito_icms.aliquota',
+    parseValor: (_chave, valor) => {
+      const v = asObj(valor);
+      return { aliquota: typeof v.aliquota === 'string' ? v.aliquota : String(v.aliquota ?? '') };
+    },
+    renderValue: (valor) => pct(String(asObj(valor).aliquota ?? '')),
+  },
+  {
+    kind: 'SIMPLES_ALIQUOTA_EFETIVA',
+    label: 'Alíquota efetiva do Simples (Lei 12.741)',
+    description:
+      'Alíquota efetiva do DAS da empresa, usada no valor aproximado dos tributos (vTotTrib) ' +
+      'das vendas a consumidor final. Use escopo da empresa e atualize a vigência mensalmente.',
+    icon: 'gauge',
+    tone: 'info',
+    fields: ['aliquota'],
+    buildChave: () => 'simples.aliquota_efetiva',
+    buildValor: (f) => ({ aliquota: f.aliquota }),
+    detectKind: (chave) => chave === 'simples.aliquota_efetiva',
+    parseValor: (_chave, valor) => {
+      const v = asObj(valor);
+      return { aliquota: typeof v.aliquota === 'string' ? v.aliquota : String(v.aliquota ?? '') };
+    },
+    renderValue: (valor) => pct(String(asObj(valor).aliquota ?? '')),
+  },
 ];
 
 /** UFs disponíveis no select de "IBS por UF". */
@@ -224,5 +280,10 @@ export function defaultFormState(kind: ParameterKind): ParameterFormState {
       return { kind, categoria: 'combustivel', aliquota: '' };
     case 'PIS_COFINS_ENCERRAMENTO':
       return { kind, data: '2027-01-01' };
+    case 'DIFAL_BASE_DUPLA_UF':
+      return { kind, uf: 'MG' };
+    case 'SIMPLES_CREDITO_ICMS':
+    case 'SIMPLES_ALIQUOTA_EFETIVA':
+      return { kind, aliquota: '' };
   }
 }

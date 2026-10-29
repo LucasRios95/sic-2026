@@ -24,6 +24,12 @@ import {
   saveNFeDraft,
   type NFeDraft,
 } from '@/features/nfe/nfe-draft';
+import { TaxReviewDialog, type LinhaConferencia } from '@/features/nfe/TaxReviewDialog';
+import {
+  ajustesParaApi,
+  contarAjustes,
+  type AjustesDigitados,
+} from '@/features/nfe/tax-review';
 import { getProduct, listProducts } from '@/features/products/products-api';
 import { ApiError } from '@/lib/api';
 import { formatDecimal, parseDecimal, toDecimalInput } from '@/lib/format';
@@ -56,6 +62,8 @@ interface ItemRow {
   valorFrete: string;
   /** Override do código de ICMS (CSOSN p/ Simples, CST p/ Normal). Vazio = usa a regra do produto. */
   icmsCodigo: string;
+  /** Base/alíquota digitadas no modal "Impostos" (texto BR). Vazio = cálculo automático. */
+  ajustes: AjustesDigitados;
 }
 
 let nextRowId = 1;
@@ -68,6 +76,7 @@ const makeRow = (): ItemRow => ({
   valorDesconto: '0,00',
   valorFrete: '0,00',
   icmsCodigo: '',
+  ajustes: {},
 });
 
 /**
@@ -83,9 +92,39 @@ function numeroDigitado(v: string): number {
   return Number(parseDecimal(v));
 }
 
-/** Normaliza um valor monetário opcional: só envia quando > 0 (evita mandar "0.00" à toa). */
+/**
+ * Espelha o `decimalString` dos validators do backend. Precisa ser checado ANTES de
+ * enviar: estados intermediários de digitação ("13,", "" após apagar) passam por
+ * `parseDecimal` sem virar decimal válido ("13.", "").
+ */
+const DECIMAL_API = /^-?\d+(\.\d+)?$/;
+function decimalApiValido(v: string): boolean {
+  return DECIMAL_API.test(paraApi(v));
+}
+
+/** Normaliza um valor monetário opcional: só envia quando é decimal válido e > 0. */
 function valorPositivoOuUndefined(v: string): string | undefined {
+  if (!decimalApiValido(v)) return undefined;
   return numeroDigitado(v) > 0 ? paraApi(v) : undefined;
+}
+
+/**
+ * Linha pronta para entrar no payload de cálculo/emissão.
+ *
+ * O backend valida o payload INTEIRO de uma vez: um único campo malformado numa linha
+ * (valor unitário vazio, "13," no meio da digitação, CFOP com 3 dígitos) faz o
+ * /tax/simulate responder 422 "Dados inválidos" e a nota toda deixa de calcular — o que
+ * fica cada vez mais provável quanto mais itens a nota tem. Filtramos aqui para que uma
+ * linha ainda incompleta apenas fique de fora do preview, em vez de derrubá-lo.
+ */
+function linhaCalculavel(it: ItemRow): boolean {
+  return (
+    !!it.productId &&
+    decimalApiValido(it.quantidade) &&
+    numeroDigitado(it.quantidade) > 0 &&
+    decimalApiValido(it.valorUnitario) &&
+    /^\d{4}$/.test(it.cfop)
+  );
 }
 
 /** CSOSN (Simples Nacional) — código + descrição curta. */
@@ -345,6 +384,7 @@ export function NFeNewPage(): React.ReactElement {
           valorDesconto: toDecimalInput(it.valorDesconto ?? '0.00'),
           valorFrete: toDecimalInput(it.valorFrete ?? '0.00'),
           icmsCodigo: '', // reemissão usa o código da regra vigente do produto
+          ajustes: {}, // e o cálculo automático dos impostos — o faturista reconfere
         })),
       );
     }
@@ -458,7 +498,7 @@ export function NFeNewPage(): React.ReactElement {
       // Regenera ids das linhas para não colidir com novas linhas (makeRow) da sessão.
       setItems(
         d.items.length > 0
-          ? d.items.map((it) => ({ ...it, id: `row-${nextRowId++}` }))
+          ? d.items.map((it) => ({ ...it, ajustes: it.ajustes ?? {}, id: `row-${nextRowId++}` }))
           : [makeRow()],
       );
       setPagamentoMeio(d.pagamentoMeio);
@@ -503,10 +543,23 @@ export function NFeNewPage(): React.ReactElement {
     window.setTimeout(() => setSavedFeedback(false), 2000);
   }
 
+  // Override de CST/CSOSN da linha no campo do regime da empresa. Vai igual nos três
+  // payloads (cálculo, espelho DANFE e emissão) — antes o cálculo não recebia o override e
+  // a prévia mostrava imposto de um código enquanto a nota saía com outro.
+  const codigoIcmsDaLinha = useCallback(
+    (it: ItemRow): { csosnIcms?: string; cstIcms?: string } =>
+      it.icmsCodigo
+        ? isSimples
+          ? { csosnIcms: it.icmsCodigo }
+          : { cstIcms: it.icmsCodigo }
+        : {},
+    [isSimples],
+  );
+
   // Debounce do payload do simulate para evitar tempestade de requests enquanto digita.
   const simulateInput = useMemo(() => {
     if (!activeCustomer) return null;
-    const validItems = items.filter((it) => it.productId && numeroDigitado(it.quantidade) > 0);
+    const validItems = items.filter(linhaCalculavel);
     if (validItems.length === 0) return null;
     return {
       destinatario: {
@@ -522,9 +575,11 @@ export function NFeNewPage(): React.ReactElement {
         valorDesconto: valorPositivoOuUndefined(it.valorDesconto),
         valorFrete: valorPositivoOuUndefined(it.valorFrete),
         cfop: it.cfop,
+        ...codigoIcmsDaLinha(it),
+        ajustes: ajustesParaApi(it.ajustes),
       })),
     };
-  }, [activeCustomer, items]);
+  }, [activeCustomer, items, codigoIcmsDaLinha]);
   const debouncedInput = useDebounce(simulateInput, 400);
 
   const simulationQuery = useQuery({
@@ -534,6 +589,53 @@ export function NFeNewPage(): React.ReactElement {
   });
 
   const valorTotal = simulationQuery.data?.totais.valorTotal ?? '0.00';
+
+  // Linhas que já têm produto mas ainda não entram no cálculo (campo vazio ou no meio
+  // da digitação). Antes elas derrubavam a simulação inteira sem dizer qual era.
+  const linhasPendentes = items
+    .map((it, idx) => ({ it, numero: idx + 1 }))
+    .filter(({ it }) => it.productId && !linhaCalculavel(it))
+    .map(({ numero }) => numero);
+
+  // Só liberamos a emissão com um total calculado: sem ele o pagamento iria com 0,00
+  // (a SEFAZ rejeita a soma dos pagamentos vs. vNF). E calculado sobre o que está na tela:
+  // logo após um "Recalcular" (ou qualquer digitação) o total ainda é o da versão anterior
+  // até o debounce + request terminarem — emitir nessa janela mandaria vPag ≠ vNF.
+  const calculoEmDia =
+    debouncedInput === simulateInput && !simulationQuery.isFetching && !simulationQuery.error;
+  const totalCalculado = !!simulationQuery.data && calculoEmDia;
+
+  const [impostosAberto, setImpostosAberto] = useState(false);
+  const totalAjustesManuais = items.reduce((acc, it) => acc + contarAjustes(it.ajustes), 0);
+
+  // Linhas que o modal "Impostos" confere: as que têm produto (as fora do cálculo aparecem
+  // lá com aviso, para o faturista não achar que sumiram).
+  const linhasConferencia: LinhaConferencia[] = items
+    .map((it, idx) => ({ it, numero: idx + 1 }))
+    .filter(({ it }) => it.productId)
+    .map(({ it, numero }) => {
+      const p = productCacheRef.current[it.productId];
+      return {
+        rowId: it.id,
+        numero,
+        descricao: p ? `${p.codigo} — ${p.descricao}` : 'Produto',
+        cfop: it.cfop,
+        ajustes: it.ajustes,
+      };
+    });
+
+  function aplicarAjustes(porLinha: Record<string, AjustesDigitados>): void {
+    setItems((prev) =>
+      prev.map((it) => (it.id in porLinha ? { ...it, ajustes: porLinha[it.id] } : it)),
+    );
+  }
+
+  // Posição no payload enviado → número do produto na tela, para traduzir os caminhos
+  // ("itens.6.valorUnitario") que o backend devolve nos erros de validação.
+  const numerosDeLinhaEnviados = useMemo(() => {
+    const porItemId = new Map(items.map((it, idx) => [it.id, idx + 1]));
+    return (debouncedInput?.itens ?? []).map((i) => porItemId.get(i.itemId) ?? 0);
+  }, [debouncedInput, items]);
 
   const emitirMutation = useMutation({
     mutationFn: () => {
@@ -604,11 +706,9 @@ export function NFeNewPage(): React.ReactElement {
             valorDesconto: valorPositivoOuUndefined(it.valorDesconto),
             valorFrete: valorPositivoOuUndefined(it.valorFrete),
             // Override do código de ICMS, conforme o regime da empresa. Vazio = usa a regra.
-            ...(it.icmsCodigo
-              ? isSimples
-                ? { csosnIcms: it.icmsCodigo }
-                : { cstIcms: it.icmsCodigo }
-              : {}),
+            ...codigoIcmsDaLinha(it),
+            // Mesmos ajustes do cálculo exibido — o backend recalcula igual na emissão.
+            ajustes: ajustesParaApi(it.ajustes),
           })),
         pagamentos: [
           {
@@ -644,7 +744,9 @@ export function NFeNewPage(): React.ReactElement {
   // Payload do espelho DANFE (pré-visualização). null enquanto faltam dados mínimos
   // (cliente + ao menos um item com produto) — o painel mostra uma dica nesse caso.
   const previewPayload = useMemo<PreviewDanfePayload | null>(() => {
-    const itensValidos = items.filter((it) => it.productId);
+    // Mesmo critério do cálculo: uma linha ainda incompleta invalidaria o payload
+    // inteiro do espelho (422) em vez de só não aparecer nele.
+    const itensValidos = items.filter(linhaCalculavel);
     if (!customerId || itensValidos.length === 0) return null;
 
     const chavesValidas = chavesReferenciadas
@@ -707,11 +809,8 @@ export function NFeNewPage(): React.ReactElement {
         valorUnitario: paraApi(it.valorUnitario),
         valorDesconto: valorPositivoOuUndefined(it.valorDesconto),
         valorFrete: valorPositivoOuUndefined(it.valorFrete),
-        ...(it.icmsCodigo
-          ? isSimples
-            ? { csosnIcms: it.icmsCodigo }
-            : { cstIcms: it.icmsCodigo }
-          : {}),
+        ...codigoIcmsDaLinha(it),
+        ajustes: ajustesParaApi(it.ajustes),
       })),
     };
     // productCacheVersion entra nas deps para reidratar a unidadeComercial quando o cache
@@ -740,7 +839,7 @@ export function NFeNewPage(): React.ReactElement {
     volPesoBruto,
     items,
     infCpl,
-    isSimples,
+    codigoIcmsDaLinha,
     productCacheVersion,
   ]);
 
@@ -772,7 +871,8 @@ export function NFeNewPage(): React.ReactElement {
     }
     const baseCfop =
       tipoOperacao === 'SAIDA' ? product.cfopPadraoSaida : product.cfopPadraoEntrada;
-    updateItem(rowId, { productId, ...(baseCfop ? { cfop: baseCfop } : {}) });
+    // Ajustes de imposto eram do produto anterior — não fazem sentido no novo.
+    updateItem(rowId, { productId, ajustes: {}, ...(baseCfop ? { cfop: baseCfop } : {}) });
   }
 
   function removeItem(id: string): void {
@@ -1057,7 +1157,19 @@ export function NFeNewPage(): React.ReactElement {
               className="grid grid-cols-[1fr_64px_56px_96px_88px_88px_130px_32px] gap-2 items-end border-b border-border pb-2 last:border-0"
             >
               <div className="space-y-1">
-                <Label className="text-xs">Produto #{idx + 1}</Label>
+                <Label className="text-xs">
+                  Produto #{idx + 1}
+                  {contarAjustes(row.ajustes) > 0 ? (
+                    <button
+                      type="button"
+                      className="ml-2 text-[10px] font-normal text-amber-700 underline"
+                      onClick={() => setImpostosAberto(true)}
+                      title="Este item tem base/alíquota digitada à mão — confira se ainda vale após mudar qtd/valor"
+                    >
+                      impostos ajustados
+                    </button>
+                  ) : null}
+                </Label>
                 <SearchCombobox
                   value={row.productId}
                   onChange={(id) => aplicarProduto(row.id, id)}
@@ -1288,13 +1400,32 @@ export function NFeNewPage(): React.ReactElement {
       </Card>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">
             Pré-visualização tributária
             {simulationQuery.isFetching ? (
               <span className="text-xs text-muted-foreground ml-2">calculando…</span>
             ) : null}
           </CardTitle>
+          <div className="flex items-center gap-2">
+            {totalAjustesManuais > 0 ? (
+              <Badge className="bg-amber-100 text-amber-800">
+                {totalAjustesManuais} ajuste(s) manual(is) de imposto
+              </Badge>
+            ) : null}
+            <Button
+              variant="secondary"
+              onClick={() => setImpostosAberto(true)}
+              disabled={!simulateInput}
+              title={
+                simulateInput
+                  ? 'Conferir e ajustar base, alíquota e valor de cada imposto'
+                  : 'Selecione o cliente e ao menos um item com valor'
+              }
+            >
+              Impostos
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {!simulateInput ? (
@@ -1302,17 +1433,27 @@ export function NFeNewPage(): React.ReactElement {
               Selecione um cliente e adicione pelo menos um item com valor.
             </p>
           ) : simulationQuery.error ? (
-            <p className="text-destructive text-sm">
-              {simulationQuery.error instanceof ApiError
-                ? simulationQuery.error.message
-                : 'Falha ao calcular tributos.'}
-            </p>
+            <div className="text-destructive text-sm space-y-1">
+              <div>
+                {simulationQuery.error instanceof ApiError
+                  ? simulationQuery.error.message
+                  : 'Falha ao calcular tributos.'}
+              </div>
+              {/* Sem isto o card só dizia "Dados inválidos" e o faturista não tinha
+                  como saber qual linha corrigir. */}
+              {issuesDoErro(simulationQuery.error).map((i, idx) => (
+                <div key={idx} className="text-xs">
+                  · {descreverCampo(i.path, numerosDeLinhaEnviados)}: {i.message}
+                </div>
+              ))}
+            </div>
           ) : simulationQuery.data ? (
             <div className="space-y-2">
               <div className="grid grid-cols-4 gap-3 text-sm">
                 <Cell label="Valor produtos" value={simulationQuery.data.totais.valorProdutos} />
                 <Cell label="ICMS" value={simulationQuery.data.totais.valorIcms} />
                 <Cell label="ICMS-ST" value={simulationQuery.data.totais.valorIcmsST} />
+                <Cell label="IPI" value={simulationQuery.data.totais.valorIpi} />
                 <Cell label="DIFAL UF dest" value={simulationQuery.data.totais.valorICMSUFDest} />
                 <Cell label="IBS" value={simulationQuery.data.totais.valorIbs} />
                 <Cell label="CBS" value={simulationQuery.data.totais.valorCbs} />
@@ -1339,6 +1480,16 @@ export function NFeNewPage(): React.ReactElement {
                   ))}
                 </div>
               ) : null}
+            </div>
+          ) : null}
+
+          {linhasPendentes.length > 0 ? (
+            <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              {linhasPendentes.length === 1
+                ? `O produto #${linhasPendentes[0]} está fora do cálculo`
+                : `Os produtos #${linhasPendentes.join(', #')} estão fora do cálculo`}{' '}
+              — preencha Qtd, Valor unit. e um CFOP de 4 dígitos. Os demais itens continuam
+              sendo calculados normalmente.
             </div>
           ) : null}
         </CardContent>
@@ -1382,9 +1533,19 @@ export function NFeNewPage(): React.ReactElement {
             disabled={
               !customerId ||
               items.every((it) => !it.productId) ||
+              // Sem total calculado o pagamento sairia 0,00 e a SEFAZ rejeita a nota.
+              !totalCalculado ||
+              linhasPendentes.length > 0 ||
               transpDocInvalido ||
               (exigeReferencia &&
                 !chavesReferenciadas.some((c) => c.replace(/\D/g, '').length === 44))
+            }
+            title={
+              linhasPendentes.length > 0
+                ? 'Há itens fora do cálculo — corrija os campos apontados acima.'
+                : !totalCalculado
+                  ? 'Aguardando a pré-visualização tributária calcular o total da nota.'
+                  : undefined
             }
           >
             Emitir NF-e
@@ -1393,6 +1554,28 @@ export function NFeNewPage(): React.ReactElement {
       </Card>
 
       <DanfePreviewPanel payload={previewPayload} />
+
+      <TaxReviewDialog
+        open={impostosAberto}
+        onOpenChange={setImpostosAberto}
+        linhas={linhasConferencia}
+        resultado={simulationQuery.data}
+        calculando={!calculoEmDia && !!simulateInput}
+        erro={
+          simulationQuery.error
+            ? simulationQuery.error instanceof ApiError
+              ? [
+                  simulationQuery.error.message,
+                  ...issuesDoErro(simulationQuery.error).map(
+                    (i) => `${descreverCampo(i.path, numerosDeLinhaEnviados)}: ${i.message}`,
+                  ),
+                ].join(' · ')
+              : 'Falha ao calcular tributos.'
+            : null
+        }
+        isSimples={isSimples}
+        onAplicar={aplicarAjustes}
+      />
     </div>
   );
 }
@@ -1432,6 +1615,42 @@ function formatEmitError(err: unknown): string {
 
   if (err.requestId) lines.push(`  (requestId: ${err.requestId})`);
   return lines.join('\n');
+}
+
+/**
+ * Extrai os `issues` que o middleware `validate` do backend manda em `details` —
+ * cada um com o caminho completo do campo ("itens.6.valorUnitario").
+ */
+function issuesDoErro(err: unknown): Array<{ path: string; message: string }> {
+  if (!(err instanceof ApiError) || !err.details || typeof err.details !== 'object') return [];
+  const issues = (err.details as { issues?: unknown }).issues;
+  if (!Array.isArray(issues)) return [];
+  return issues.filter(
+    (i): i is { path: string; message: string } =>
+      !!i && typeof i.path === 'string' && typeof i.message === 'string',
+  );
+}
+
+/**
+ * "itens.6.valorUnitario" → "Produto #7 · Valor unit.".
+ *
+ * O índice do issue é a posição no array ENVIADO, que não bate com a posição na tela
+ * (linhas incompletas ficam de fora do payload). `numerosDeLinha` traduz uma na outra.
+ */
+function descreverCampo(path: string, numerosDeLinha: number[]): string {
+  const match = /^itens\.(\d+)\.(\w+)$/.exec(path);
+  if (!match) return path;
+  const numeroNaTela = numerosDeLinha[Number(match[1])];
+  const rotulos: Record<string, string> = {
+    productId: 'Produto',
+    cfop: 'CFOP',
+    quantidade: 'Qtd',
+    valorUnitario: 'Valor unit.',
+    valorDesconto: 'Desc.',
+    valorFrete: 'Frete',
+  };
+  const campo = rotulos[match[2]] ?? match[2];
+  return numeroNaTela ? `Produto #${numeroNaTela} · ${campo}` : campo;
 }
 
 function Cell({

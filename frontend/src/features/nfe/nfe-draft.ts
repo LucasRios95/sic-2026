@@ -1,4 +1,5 @@
 import type { FinalidadeNFe, ModFrete, TipoOperacao } from './nfe-api';
+import type { AjustesDigitados } from './tax-review';
 
 /** Item do rascunho — espelha o `ItemRow` da tela de emissão (objeto plano serializável). */
 export interface NFeDraftItem {
@@ -10,6 +11,8 @@ export interface NFeDraftItem {
   valorDesconto: string;
   valorFrete: string;
   icmsCodigo: string;
+  /** Ajustes do modal "Impostos" (texto BR). Ausente em rascunhos antigos. */
+  ajustes?: AjustesDigitados;
 }
 
 /** Snapshot completo do formulário de nova NF-e, persistido localmente. */

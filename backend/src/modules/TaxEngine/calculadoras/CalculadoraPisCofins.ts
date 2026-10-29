@@ -4,8 +4,14 @@ import { Money } from '@shared/domain/Money';
 
 import { ContextoCalculo, ItemContexto } from '../domain/ContextoCalculo';
 import { CalculadoraSlice, ICalculadoraTributo } from '../domain/ICalculadoraTributo';
-import { baseDefaultItem } from '../domain/item-utils';
+import { ajusteOu, baseDefaultItem, temAjuste } from '../domain/item-utils';
+import { ResultadoCalculoItem } from '../domain/ResultadoCalculo';
 import { ITaxParameterRepository } from '../repositories/ITaxParameterRepository';
+
+/** CST de PIS/COFINS 04–09: grupo PISNT/COFINSNT, sem vBC/alíquota/valor no XML. */
+function cstNaoTributado(cst: string | null | undefined): boolean {
+  return !!cst && ['04', '05', '06', '07', '08', '09'].includes(cst);
+}
 
 /**
  * Calculadora de PIS/COFINS (regime antigo). Vigência: até dezembro/2026, encerrada
@@ -19,6 +25,11 @@ import { ITaxParameterRepository } from '../repositories/ITaxParameterRepository
  * CST cumulativo (regime presumido): geralmente 0,65% PIS + 3% COFINS.
  * CST não-cumulativo (regime real): 1,65% PIS + 7,6% COFINS.
  * Os valores reais vêm da regra do produto (PRD: tributação como dados).
+ *
+ * Base (modo padrão): valor do item − desconto + frete/seguro/outras − ICMS destacado no
+ * item. A exclusão do ICMS segue o Tema 69 do STF (RE 574.706 — "o ICMS não compõe a base
+ * de cálculo do PIS e da COFINS"), considerando o ICMS destacado na nota (vICMS, já líquido
+ * de diferimento). ICMS-ST, DIFAL e FCP não são excluídos. Ajuste manual de base prevalece.
  */
 @injectable()
 export class CalculadoraPisCofins implements ICalculadoraTributo {
@@ -33,7 +44,11 @@ export class CalculadoraPisCofins implements ICalculadoraTributo {
     return Boolean(item.taxRule.cstPis || item.taxRule.cstCofins);
   }
 
-  async calcular(contexto: ContextoCalculo, item: ItemContexto): Promise<CalculadoraSlice> {
+  async calcular(
+    contexto: ContextoCalculo,
+    item: ItemContexto,
+    parcial?: Readonly<ResultadoCalculoItem>,
+  ): Promise<CalculadoraSlice> {
     const warnings: string[] = [];
 
     const encerramento = await this.taxParam.findActiveAt(
@@ -59,10 +74,18 @@ export class CalculadoraPisCofins implements ICalculadoraTributo {
     }
 
     const rule = item.taxRule;
-    const base = baseDefaultItem(item);
     const passos: string[] = [];
     const detalhe: Record<string, string | number | boolean | null> = {};
     const campos: CalculadoraSlice['campos'] = {};
+
+    // Tema 69/STF: ICMS destacado no item sai da base (nunca abaixo de zero).
+    const icmsExcluido = parcial?.valorIcms ? new Money(parcial.valorIcms) : Money.zero();
+    let base = baseDefaultItem(item).sub(icmsExcluido);
+    if (!base.isPositive()) base = Money.zero();
+    if (!icmsExcluido.isZero() && !rule.pisCofinsPorUnidade) {
+      detalhe.icmsExcluidoDaBase = icmsExcluido.toString(2);
+      passos.push(`base sem ICMS (−R$ ${icmsExcluido.toString(2)}, Tema 69/STF)`);
+    }
 
     if (rule.pisCofinsPorUnidade) {
       const qtd = new Money(item.quantidade);
@@ -83,23 +106,37 @@ export class CalculadoraPisCofins implements ICalculadoraTributo {
         detalhe.cofinsModo = 'unidade';
       }
     } else {
-      if (rule.aliqPis) {
-        const aliq = new Money(rule.aliqPis);
-        const valor = base.applyPercent(aliq);
-        campos.basePis = base.round(2).toString(2);
-        campos.aliqPis = aliq.round(4).toString(4);
-        campos.valorPis = valor.round(2).toString(2);
-        passos.push(`PIS: base × ${aliq.toString(4)}%`);
-        detalhe.pisAliq = aliq.toString(4);
+      // Valor = base arredondada × alíquota (o que o XML mostra em vBC × pPIS/pCOFINS).
+      // CST 04–09 vai no grupo NT (sem valores): calcular faria o total divergir do item.
+      const ajPis = item.ajustes?.pis;
+      const aliqPis = cstNaoTributado(rule.cstPis)
+        ? null
+        : ajusteOu(ajPis?.aliquota, rule.aliqPis ? new Money(rule.aliqPis) : null);
+      if (aliqPis) {
+        const basePis = ajusteOu(ajPis?.base, base).round(2);
+        const manual = temAjuste(ajPis);
+        campos.basePis = basePis.toString(2);
+        campos.aliqPis = aliqPis.round(4).toString(4);
+        campos.valorPis = basePis.applyPercent(aliqPis).round(2).toString(2);
+        passos.push(`PIS: base × ${aliqPis.toString(4)}%${manual ? ' (ajustado manualmente)' : ''}`);
+        detalhe.pisAliq = aliqPis.toString(4);
+        if (manual) detalhe.pisAjusteManual = true;
       }
-      if (rule.aliqCofins) {
-        const aliq = new Money(rule.aliqCofins);
-        const valor = base.applyPercent(aliq);
-        campos.baseCofins = base.round(2).toString(2);
-        campos.aliqCofins = aliq.round(4).toString(4);
-        campos.valorCofins = valor.round(2).toString(2);
-        passos.push(`COFINS: base × ${aliq.toString(4)}%`);
-        detalhe.cofinsAliq = aliq.toString(4);
+      const ajCofins = item.ajustes?.cofins;
+      const aliqCofins = cstNaoTributado(rule.cstCofins)
+        ? null
+        : ajusteOu(ajCofins?.aliquota, rule.aliqCofins ? new Money(rule.aliqCofins) : null);
+      if (aliqCofins) {
+        const baseCofins = ajusteOu(ajCofins?.base, base).round(2);
+        const manual = temAjuste(ajCofins);
+        campos.baseCofins = baseCofins.toString(2);
+        campos.aliqCofins = aliqCofins.round(4).toString(4);
+        campos.valorCofins = baseCofins.applyPercent(aliqCofins).round(2).toString(2);
+        passos.push(
+          `COFINS: base × ${aliqCofins.toString(4)}%${manual ? ' (ajustado manualmente)' : ''}`,
+        );
+        detalhe.cofinsAliq = aliqCofins.toString(4);
+        if (manual) detalhe.cofinsAjusteManual = true;
       }
     }
 

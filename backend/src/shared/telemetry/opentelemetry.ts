@@ -25,14 +25,18 @@ export async function initializeTelemetry(): Promise<{ shutdown: () => Promise<v
   const { NodeSDK } = await import('@opentelemetry/sdk-node');
   const { getNodeAutoInstrumentations } = await import('@opentelemetry/auto-instrumentations-node');
   const { OTLPTraceExporter } = await import('@opentelemetry/exporter-trace-otlp-http');
-  const { resourceFromAttributes } = await import('@opentelemetry/resources');
+  // `Resource` é a API do @opentelemetry/resources 1.x, que é a linha pareada com o
+  // sdk-node 0.57 instalado aqui. O helper `resourceFromAttributes` só existe a partir
+  // do resources 2.x — usá-lo derrubava o boot com "não é uma função" assim que
+  // OTEL_EXPORTER_OTLP_ENDPOINT fosse definido.
+  const { Resource } = await import('@opentelemetry/resources');
   const {
     ATTR_SERVICE_NAME,
     ATTR_SERVICE_VERSION,
   } = await import('@opentelemetry/semantic-conventions');
 
   const sdk = new NodeSDK({
-    resource: resourceFromAttributes({
+    resource: new Resource({
       [ATTR_SERVICE_NAME]: env.OTEL_SERVICE_NAME,
       [ATTR_SERVICE_VERSION]: '0.1.0',
       'deployment.environment': env.NODE_ENV,

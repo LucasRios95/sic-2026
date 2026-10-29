@@ -10,7 +10,8 @@ import { IProductRepository } from '@modules/Products/repositories/IProductRepos
 import { IProductTaxRuleRepository } from '@modules/Products/repositories/IProductTaxRuleRepository';
 import { SefazHealthState } from '@modules/SefazHealth/domain/sefaz-health-enums';
 import { SefazHealthMonitorService } from '@modules/SefazHealth/SefazHealthMonitorService';
-import { ContextoCalculo } from '@modules/TaxEngine/domain/ContextoCalculo';
+import { AjustesTributariosItem, ContextoCalculo } from '@modules/TaxEngine/domain/ContextoCalculo';
+import { aplicarOverrideIcms } from '@modules/TaxEngine/domain/override-icms';
 import { MotorTributario } from '@modules/TaxEngine/MotorTributario';
 import { CertificateAccessor } from '@shared/container/providers/CertificateVault/CertificateAccessor';
 import { BusinessRuleError, IntegrationError, NotFoundError } from '@shared/errors';
@@ -36,6 +37,9 @@ import { NFe } from '../../infra/typeorm/entities/NFe';
 import { NFeSchemaValidator } from '../../infra/validation/NFeSchemaValidator';
 import { INFeRepository } from '../../repositories/INFeRepository';
 import { INumberingSeriesRepository } from '../../repositories/INumberingSeriesRepository';
+
+// Mantido exportado daqui por compatibilidade (PreviewDanfe e testes importam deste módulo).
+export { aplicarOverrideIcms };
 
 /**
  * Use case central da Fase 1a — emite uma NF-e modelo 55 fim-a-fim.
@@ -266,6 +270,7 @@ export class EmitirNFeUseCase {
         valorOutros: item.valorOutros,
         cfop: item.cfop,
         taxRule,
+        ajustes: item.ajustes,
         // Mantém referência para a persistência depois.
         __sourceItem: { ...item, product, taxRule },
       });
@@ -302,6 +307,10 @@ export class EmitirNFeUseCase {
       itens: itensCtx as unknown as ContextoCalculo['itens'],
     };
     const calculo = await this.motorTributario.calcular(contexto);
+
+    // Textos legais que dependem do cálculo (crédito do Simples, Lei 12.741) vão para o
+    // infCpl ANTES de persistir/serializar — entidade, XML e DANFE saem iguais.
+    request.infCpl = appendInfoTributariaToInfCpl(request.infCpl, calculo, company.crt);
 
     // 6) Persiste NFe + items + pagamentos com status PENDING (sem XML ainda)
     const operacaoInterestadual = customer.uf !== company.uf;
@@ -345,10 +354,10 @@ export class EmitirNFeUseCase {
         valorDesconto: t.valorDesconto,
         valorOutros: t.valorOutros,
         valorTotal: t.valorTotal,
-        baseIcms: '0',
+        baseIcms: t.baseIcms,
         valorIcms: t.valorIcms,
         valorIcmsDeson: t.valorIcmsDeson,
-        baseIcmsST: '0',
+        baseIcmsST: t.baseIcmsST,
         valorIcmsST: t.valorIcmsST,
         valorFCP: t.valorFCP,
         valorFCPST: '0',
@@ -360,7 +369,7 @@ export class EmitirNFeUseCase {
         valorPis: t.valorPis,
         valorCofins: t.valorCofins,
         valorII: '0',
-        valorTotTrib: '0',
+        valorTotTrib: t.valorTotTrib,
         baseIbsCbs: t.baseIbsCbs,
         valorIbs: t.valorIbs,
         valorCbs: t.valorCbs,
@@ -496,6 +505,14 @@ export class EmitirNFeUseCase {
         status: finalNFe.status,
         cStat: finalNFe.cStat,
         valorTotal: finalNFe.valorTotal,
+        // Trilha dos impostos digitados à mão na conferência (modal "Impostos").
+        ...(request.itens.some((it) => it.ajustes && Object.keys(it.ajustes).length > 0)
+          ? {
+              ajustesTributarios: request.itens
+                .filter((it) => it.ajustes && Object.keys(it.ajustes).length > 0)
+                .map((it) => ({ numeroItem: it.numeroItem, ajustes: it.ajustes })),
+            }
+          : {}),
       },
     });
 
@@ -862,11 +879,18 @@ export class EmitirNFeUseCase {
           valorIcms: r.valorIcms,
           valorIcmsDeson: r.valorIcmsDeson,
           motDesICMS: r.motDesICMS,
+          valorIcmsOp: r.valorIcmsOp,
+          pDif: r.pDif,
+          valorIcmsDif: r.valorIcmsDif,
+          pCredSN: r.pCredSN,
+          valorCredSN: r.valorCredSN,
+          valorTotTrib: r.valorTotTrib,
           cstIcmsSt: tr.cstIcmsSt ?? undefined,
           baseIcmsST: r.baseIcmsST,
           aliqIcmsST: r.aliqIcmsST,
           valorIcmsST: r.valorIcmsST,
           pMVAST: r.pMVAST,
+          pRedBCST: r.pRedBCST,
           modBCST: r.modBCST,
           baseFCP: r.baseFCP,
           pFCP: r.pFCP,
@@ -911,10 +935,12 @@ export class EmitirNFeUseCase {
         valorSeguro: calculo.totais.valorSeguro,
         valorOutros: calculo.totais.valorOutros,
         valorTotal: calculo.totais.valorTotal,
-        baseIcms: '0.00',
+        // vBC/vBCST do ICMSTot precisam bater com a soma dos itens (cStat 531/533) — antes
+        // iam fixos em 0.00 mesmo com itens CST 00/10/20 destacando base.
+        baseIcms: calculo.totais.baseIcms,
         valorIcms: calculo.totais.valorIcms,
         valorIcmsDeson: calculo.totais.valorIcmsDeson,
-        baseIcmsST: '0.00',
+        baseIcmsST: calculo.totais.baseIcmsST,
         valorIcmsST: calculo.totais.valorIcmsST,
         valorFCP: calculo.totais.valorFCP,
         valorFCPST: '0.00',
@@ -926,7 +952,7 @@ export class EmitirNFeUseCase {
         valorPis: calculo.totais.valorPis,
         valorCofins: calculo.totais.valorCofins,
         valorII: '0.00',
-        valorTotTrib: '0.00',
+        valorTotTrib: calculo.totais.valorTotTrib,
         baseIbsCbs: calculo.totais.baseIbsCbs,
         valorIbs: calculo.totais.valorIbs,
         valorCbs: calculo.totais.valorCbs,
@@ -972,6 +998,11 @@ export interface EmitirNFeItemInput {
    */
   cstIcms?: string;
   csosnIcms?: string;
+  /**
+   * Base/alíquota de cada tributo conferidas e digitadas pelo faturista (modal "Impostos").
+   * O motor recalcula valor = base × alíquota e os totais a partir delas.
+   */
+  ajustes?: AjustesTributariosItem;
 }
 
 export interface EmitirNFePagamentoInput {
@@ -1087,60 +1118,6 @@ function extractProtocolo(responseXml: string): string | null {
  * validação posterior (`validarCfops`) rejeita com mensagem clara.
  */
 /**
- * Aplica o override de CST/CSOSN do ICMS informado item a item na nota, sobre a regra
- * tributária vigente do produto. Regras:
- *  - Validação por regime: empresa do Simples (CRT 1/2/4) usa CSOSN; Regime Normal (CRT 3)
- *    usa CST. Informar o código do regime errado é rejeitado com mensagem clara.
- *  - Coerência de valores: códigos "sem ICMS próprio" (CSOSN 102/103/300/400/500 e CST
- *    40/41/50/60) zeram a alíquota, então o motor não gera vICMS e o XML sai só com
- *    orig+CST/CSOSN. Os demais mantêm a alíquota da regra (geram vICMS / crédito).
- *
- * Observação: a apuração de ICMS próprio em operação INTERESTADUAL usa a tabela de
- * alíquotas, não a `aliqIcms` da regra — zerar a alíquota só suprime o ICMS no caminho
- * intraestadual (cenário típico de Simples/varejo). Interestadual fica como evolução.
- *
- * Retorna a própria regra (sem clonar) quando o item não traz override.
- */
-export function aplicarOverrideIcms<
-  T extends { cstIcms?: string | null; csosnIcms?: string | null; aliqIcms?: string | null },
->(
-  rule: T,
-  item: Pick<EmitirNFeItemInput, 'cstIcms' | 'csosnIcms'>,
-  crt: CodigoRegimeTributario,
-  codigoProduto: string,
-): T {
-  const cst = item.cstIcms?.trim();
-  const csosn = item.csosnIcms?.trim();
-  if (!cst && !csosn) return rule;
-
-  const simples = crt !== CodigoRegimeTributario.REGIME_NORMAL;
-  if (simples && cst && !csosn) {
-    throw new BusinessRuleError(
-      `Item ${codigoProduto}: empresa do Simples Nacional usa CSOSN, não CST de ICMS.`,
-      'ICMS_CODE_REGIME_MISMATCH',
-    );
-  }
-  if (!simples && csosn && !cst) {
-    throw new BusinessRuleError(
-      `Item ${codigoProduto}: empresa do Regime Normal usa CST de ICMS, não CSOSN.`,
-      'ICMS_CODE_REGIME_MISMATCH',
-    );
-  }
-
-  const codigo = (simples ? csosn : cst)!;
-  const semIcmsProprio = simples
-    ? ['102', '103', '300', '400', '500'].includes(codigo)
-    : ['40', '41', '50', '60'].includes(codigo);
-
-  return {
-    ...rule,
-    cstIcms: simples ? null : codigo,
-    csosnIcms: simples ? codigo : null,
-    aliqIcms: semIcmsProprio ? null : rule.aliqIcms,
-  };
-}
-
-/**
  * Anexa as informações adicionais do cliente (ponto de referência e observações) às
  * informações complementares (infCpl) da NF-e. O complemento do endereço já vai no grupo
  * de endereço (xCpl), então NÃO entra aqui. O resultado aparece no XML (tag infCpl) e no
@@ -1157,6 +1134,83 @@ export function appendCustomerInfoToInfCpl(
   if (ref) parts.push(`Ponto de referência: ${ref}`);
   const obs = customer.observacoes?.trim();
   if (obs) parts.push(obs);
+  const result = parts.join(' | ');
+  return result.length > 0 ? result : undefined;
+}
+
+/** "1234.5" → "1.234,50" (texto legal do infCpl é lido por gente, não por máquina). */
+function brl(valor: string | number): string {
+  return Number(valor).toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+/**
+ * Anexa ao infCpl os textos legais que dependem do cálculo dos tributos:
+ *
+ *  - Crédito de ICMS do Simples (CSOSN 101/201/900 com vCredICMSSN > 0): texto do art. 59
+ *    da Res. CGSN 140/2018 — "PERMITE O APROVEITAMENTO DO CRÉDITO DE ICMS NO VALOR DE R$ …;
+ *    CORRESPONDENTE À ALÍQUOTA DE …%, NOS TERMOS DO ART. 23 DA LC 123/2006".
+ *  - Valor aproximado dos tributos (Lei 12.741/2012), quando vTotTrib > 0 (o motor só o
+ *    apura em venda a consumidor final): total, % sobre o valor da nota e, no Regime
+ *    Normal, a divisão federal/estadual (Decreto 8.264/2014).
+ *
+ * Idempotente o bastante para a prévia: não duplica um texto que já esteja no infCpl.
+ */
+export function appendInfoTributariaToInfCpl(
+  infCpl: string | null | undefined,
+  calculo: {
+    itens: Array<{ pCredSN?: string; valorCredSN?: string }>;
+    totais: {
+      valorTotal: string;
+      valorCredSN: string;
+      valorTotTrib: string;
+      valorTotTribFederal: string;
+      valorTotTribEstadual: string;
+    };
+  },
+  crt: CodigoRegimeTributario,
+): string | undefined {
+  const parts: string[] = [];
+  const base = infCpl?.trim();
+  if (base) parts.push(base);
+  const t = calculo.totais;
+
+  if (Number(t.valorCredSN) > 0) {
+    const aliquotas = new Set(
+      calculo.itens
+        .filter((i) => i.valorCredSN && Number(i.valorCredSN) > 0)
+        .map((i) => Number(i.pCredSN ?? 0)),
+    );
+    const aliquota =
+      aliquotas.size === 1
+        ? `${[...aliquotas][0].toLocaleString('pt-BR', { maximumFractionDigits: 4 })}%`
+        : 'INDICADA EM CADA ITEM';
+    const texto =
+      `PERMITE O APROVEITAMENTO DO CRÉDITO DE ICMS NO VALOR DE R$ ${brl(t.valorCredSN)}; ` +
+      `CORRESPONDENTE À ALÍQUOTA DE ${aliquota}, NOS TERMOS DO ART. 23 DA LEI COMPLEMENTAR Nº 123, DE 2006`;
+    if (!base?.includes('PERMITE O APROVEITAMENTO DO CRÉDITO DE ICMS')) parts.push(texto);
+  }
+
+  if (Number(t.valorTotTrib) > 0) {
+    const pct =
+      Number(t.valorTotal) > 0
+        ? ` (${((Number(t.valorTotTrib) / Number(t.valorTotal)) * 100).toLocaleString('pt-BR', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}%)`
+        : '';
+    const detalhe =
+      crt === CodigoRegimeTributario.REGIME_NORMAL
+        ? ` — Federais R$ ${brl(t.valorTotTribFederal)}; Estaduais R$ ${brl(t.valorTotTribEstadual)}`
+        : ' — Simples Nacional';
+    const texto =
+      `Valor aproximado dos tributos: R$ ${brl(t.valorTotTrib)}${pct}${detalhe}. ` +
+      'Fonte: cálculo próprio (Lei 12.741/2012)';
+    if (!base?.includes('Valor aproximado dos tributos')) parts.push(texto);
+  }
+
   const result = parts.join(' | ');
   return result.length > 0 ? result : undefined;
 }

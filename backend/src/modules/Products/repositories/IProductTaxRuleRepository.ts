@@ -9,6 +9,7 @@ export interface CreateProductTaxRuleData {
   aliqIcms?: string | null;
   modBC?: number | null;
   pRedBC?: string | null;
+  pDif?: string | null;
   importado?: boolean;
   cstIcmsSt?: string | null;
   modBCST?: number | null;

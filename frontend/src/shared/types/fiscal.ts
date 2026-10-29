@@ -156,32 +156,102 @@ export interface NFeFull extends NFeListItem {
   eventos: NFeEvent[];
 }
 
+/** Resultado do motor por item (POST /tax/simulate) — campos ausentes = não se aplica. */
+export interface TaxSimulationItem {
+  itemId: string;
+  valorTotal: string;
+  baseIcms?: string;
+  aliqIcms?: string;
+  valorIcms?: string;
+  valorIcmsDeson?: string;
+  /** Diferimento (CST 51): valorIcms = valorIcmsOp − valorIcmsDif. */
+  valorIcmsOp?: string;
+  pDif?: string;
+  valorIcmsDif?: string;
+  /** Crédito de ICMS do Simples (CSOSN 101/201/900). */
+  baseCredSN?: string;
+  pCredSN?: string;
+  valorCredSN?: string;
+  /** Valor aproximado dos tributos (Lei 12.741) — só consumidor final. */
+  valorTotTrib?: string;
+  valorTotTribFederal?: string;
+  valorTotTribEstadual?: string;
+  baseIcmsST?: string;
+  aliqIcmsST?: string;
+  valorIcmsST?: string;
+  pMVAST?: string;
+  pRedBCST?: string;
+  baseFCP?: string;
+  pFCP?: string;
+  valorFCP?: string;
+  baseICMSUFDest?: string;
+  pICMSUFDest?: string;
+  pICMSInter?: string;
+  valorICMSUFDest?: string;
+  baseFCPUFDest?: string;
+  pFCPUFDest?: string;
+  valorFCPUFDest?: string;
+  baseIpi?: string;
+  aliqIpi?: string;
+  valorIpi?: string;
+  basePis?: string;
+  aliqPis?: string;
+  valorPis?: string;
+  baseCofins?: string;
+  aliqCofins?: string;
+  valorCofins?: string;
+  cstIbsCbs?: string;
+  cClassTrib?: string;
+  baseIbsCbs?: string;
+  aliqIbs?: string;
+  valorIbs?: string;
+  aliqCbs?: string;
+  valorCbs?: string;
+  modoAnoTesteIbsCbs?: boolean;
+  /** Nomes das calculadoras que se aplicaram ao item ('icms-proprio', 'icms-st', …). */
+  calculadorasAplicadas: string[];
+  /** Códigos efetivos do item (regra vigente + override de CST/CSOSN da tela). */
+  codigos: {
+    cstIcms: string | null;
+    csosnIcms: string | null;
+    cstIpi: string | null;
+    cstPis: string | null;
+    cstCofins: string | null;
+  };
+  memoria: Array<{ calculadora: string; resumo: string }>;
+  warnings: string[];
+}
+
 export interface TaxSimulationResult {
-  itens: Array<{
-    itemId: string;
-    valorTotal: string;
-    baseIcms?: string;
-    valorIcms?: string;
-    valorIcmsST?: string;
-    valorICMSUFDest?: string;
-    valorFCP?: string;
-    valorIpi?: string;
-    valorPis?: string;
-    valorCofins?: string;
-    valorIbs?: string;
-    valorCbs?: string;
-    memoria: Array<{ calculadora: string; resumo: string }>;
-    warnings: string[];
-  }>;
+  itens: TaxSimulationItem[];
   totais: {
     valorProdutos: string;
+    valorDesconto: string;
+    valorFrete: string;
+    valorSeguro: string;
+    valorOutros: string;
     valorTotal: string;
+    baseIcms: string;
     valorIcms: string;
+    valorIcmsDeson: string;
+    baseIcmsST: string;
     valorIcmsST: string;
+    valorFCP: string;
     valorICMSUFDest: string;
+    valorICMSUFRemet: string;
+    valorFCPUFDest: string;
+    valorIpi: string;
+    valorPis: string;
+    valorCofins: string;
+    baseIbsCbs: string;
     valorIbs: string;
     valorCbs: string;
+    valorIs: string;
     modoAnoTesteIbsCbs: boolean;
+    valorCredSN: string;
+    valorTotTrib: string;
+    valorTotTribFederal: string;
+    valorTotTribEstadual: string;
   };
   warnings: string[];
 }

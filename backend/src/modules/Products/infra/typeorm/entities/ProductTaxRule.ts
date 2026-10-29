@@ -58,6 +58,16 @@ export class ProductTaxRule extends BaseEntity {
   })
   pRedBC?: string | null;
 
+  /// % do ICMS da operação diferido (CST 51). 100 = diferimento total; nulo = sem diferimento.
+  @Column({
+    name: 'p_dif',
+    type: 'numeric',
+    precision: 7,
+    scale: 4,
+    nullable: true,
+  })
+  pDif?: string | null;
+
   /// Marca produto importado (origens 1, 2, 3, 5, 6, 7, 8) — força alíquota interestadual de 4%
   @Column({ type: 'boolean', default: false })
   importado!: boolean;

@@ -94,6 +94,8 @@ export interface ProductTaxRule {
   aliqIcms?: string | null;
   modBC?: number | null;
   pRedBC?: string | null;
+  /** % de diferimento do ICMS (CST 51). */
+  pDif?: string | null;
   importado?: boolean;
   cstIcmsSt?: string | null;
   modBCST?: number | null;

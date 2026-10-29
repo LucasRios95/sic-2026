@@ -16,6 +16,10 @@ export const replaceCurrentTaxRuleSchema = z.object({
   aliqIcms: decimalString.optional().nullable(),
   modBC: z.number().int().min(0).max(3).optional().nullable(),
   pRedBC: decimalString.optional().nullable(),
+  pDif: decimalString
+    .refine((v) => Number(v) >= 0 && Number(v) <= 100, 'Diferimento deve ficar entre 0 e 100%')
+    .optional()
+    .nullable(),
   importado: z.boolean().optional(),
 
   cstIcmsSt: z.string().max(4).optional().nullable(),
@@ -60,6 +64,10 @@ export const productTaxRuleSchema = z.object({
   aliqIcms: decimalString.optional().nullable(),
   modBC: z.number().int().min(0).max(3).optional().nullable(),
   pRedBC: decimalString.optional().nullable(),
+  pDif: decimalString
+    .refine((v) => Number(v) >= 0 && Number(v) <= 100, 'Diferimento deve ficar entre 0 e 100%')
+    .optional()
+    .nullable(),
   importado: z.boolean().optional(),
 
   cstIcmsSt: z.string().max(4).optional().nullable(),

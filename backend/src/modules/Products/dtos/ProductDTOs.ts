@@ -7,6 +7,8 @@ export interface IProductTaxRuleDTO {
   aliqIcms?: string | null;
   modBC?: number | null;
   pRedBC?: string | null;
+  /** % de diferimento do ICMS (CST 51). */
+  pDif?: string | null;
   importado?: boolean;
   // ICMS-ST
   cstIcmsSt?: string | null;

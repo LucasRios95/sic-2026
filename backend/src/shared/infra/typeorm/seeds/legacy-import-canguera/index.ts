@@ -623,7 +623,7 @@ async function importSuppliers(db: Db, dump: MysqlDump, companyId: string, munic
   s.warned = warnings.filter((x) => x.source === 'fornecedor').length;
 }
 
-/** Mapa codigo do produto (CPROD/LEG-id) -> {id, ncm} para ligar itens de NF-e. */
+/** Mapa codigo do produto (CPROD ou PK_CODPRODUTO) -> {id, ncm} para ligar itens de NF-e. */
 const productByCodigo = new Map<string, { id: string; ncm: string }>();
 
 const PRODUCT_COLUMNS = [
@@ -656,7 +656,9 @@ async function importProducts(db: Db, dump: MysqlDump, companyId: string, crt: s
       continue;
     }
     const cprod = cleanText(p['CPROD']);
-    const codigo = truncate(cprod && /\S/.test(cprod) ? cprod : `LEG-${pk}`, 60)!;
+    // Sem prefixo: o código vai direto pro cProd da NF-e e a contabilidade usa ele
+    // pra casar o produto com o cadastro dela na importação do XML.
+    const codigo = truncate(cprod && /\S/.test(cprod) ? cprod : pk, 60)!;
     if (seen.has(codigo)) {
       rejects.push({ source: 'produto', legacyId: pk, reason: `código duplicado no dump (${codigo})`, raw: descricao });
       continue;

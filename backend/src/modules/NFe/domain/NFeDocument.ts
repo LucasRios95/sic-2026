@@ -167,6 +167,15 @@ export interface NFeItem {
   valorIcms?: string;
   motDesICMS?: number;
   valorIcmsDeson?: string;
+  /** Diferimento (ICMS51): ICMS da operação, % diferido e valor diferido. */
+  valorIcmsOp?: string;
+  pDif?: string;
+  valorIcmsDif?: string;
+  /** Crédito do Simples (ICMSSN101/201/900). */
+  pCredSN?: string;
+  valorCredSN?: string;
+  /** Valor aproximado dos tributos do item (Lei 12.741) — tag imposto/vTotTrib. */
+  valorTotTrib?: string;
   /** Código de benefício fiscal (cBenef) aplicado. */
   cBenef?: string;
 
@@ -174,6 +183,7 @@ export interface NFeItem {
   cstIcmsSt?: string;
   modBCST?: number;
   pMVAST?: string;
+  pRedBCST?: string;
   baseIcmsST?: string;
   aliqIcmsST?: string;
   valorIcmsST?: string;

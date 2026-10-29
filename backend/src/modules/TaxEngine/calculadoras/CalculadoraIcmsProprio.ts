@@ -4,7 +4,14 @@ import { Money } from '@shared/domain/Money';
 
 import { ContextoCalculo, ItemContexto } from '../domain/ContextoCalculo';
 import { CalculadoraSlice, ICalculadoraTributo } from '../domain/ICalculadoraTributo';
-import { baseDefaultItem, isImportado } from '../domain/item-utils';
+import {
+  ajusteOu,
+  baseDefaultItem,
+  CST_COM_ICMS_PROPRIO,
+  isImportado,
+  temAjuste,
+} from '../domain/item-utils';
+import { ResultadoCalculoItem } from '../domain/ResultadoCalculo';
 import { IInterstateAliquotRepository } from '../repositories/IInterstateAliquotRepository';
 
 /**
@@ -18,8 +25,17 @@ import { IInterstateAliquotRepository } from '../repositories/IInterstateAliquot
  *     - Alíquota cadastrada em ProductTaxRule.aliqIcms (sobrescrita pela empresa) — porque
  *       a alíquota interna efetiva pode variar por produto/benefício e o motor confia na regra.
  *
- * Redução de base (pRedBC > 0) é aplicada multiplicativamente sobre a base default.
+ * Base: valor do item (− desconto + frete/seguro/outros). O IPI integra a base quando o
+ * destinatário é consumidor final (CF art. 155 §2º XI — só fica de fora entre contribuintes
+ * com mercadoria para industrialização/comercialização). Redução de base (pRedBC > 0) é
+ * aplicada multiplicativamente. O valor é base ARREDONDADA × alíquota, exatamente o que o
+ * XML mostra (vBC × pICMS), evitando divergência de centavo na conferência (cStat 528).
+ *
+ * CST 51 (diferimento): vICMSOp = base × alíquota; vICMSDif = vICMSOp × pDif; o destaque
+ * (vICMS, que vai ao total) é a diferença. pDif vem da regra ou do ajuste manual.
+ *
  * Desoneração (motDesICMS) registra vICMSDeson para o XML, sem impactar o valor próprio.
+ * Ajustes manuais (`item.ajustes.icms`) substituem base, alíquota e/ou % de diferimento.
  */
 @injectable()
 export class CalculadoraIcmsProprio implements ICalculadoraTributo {
@@ -38,52 +54,86 @@ export class CalculadoraIcmsProprio implements ICalculadoraTributo {
     // com cStat 532. O crédito do SN (CSOSN 101/201) é outro conceito (vCredICMSSN), não
     // entra no vICMS e fica para uma calculadora dedicada.
     if (item.taxRule.csosnIcms) return false;
-    return true;
+    // CST sem ICMS próprio no grupo (30/40/41/50/60): nada a destacar. Antes calculávamos
+    // em operação interestadual (alíquota da tabela) e o vICMS ia para o total sem existir
+    // no item. CST ausente (regra incompleta) segue calculando — a emissão já barra isso.
+    const cst = item.taxRule.cstIcms;
+    return !cst || CST_COM_ICMS_PROPRIO.includes(cst.padStart(2, '0'));
   }
 
-  async calcular(contexto: ContextoCalculo, item: ItemContexto): Promise<CalculadoraSlice> {
+  async calcular(
+    contexto: ContextoCalculo,
+    item: ItemContexto,
+    parcial?: Readonly<ResultadoCalculoItem>,
+  ): Promise<CalculadoraSlice> {
     const rule = item.taxRule;
+    const ajuste = item.ajustes?.icms;
+    const manual = temAjuste(ajuste);
     const ufOrigem = contexto.empresa.uf;
     const ufDestino = contexto.destinatario.uf;
     const interestadual = ufOrigem !== ufDestino;
     const warnings: string[] = [];
 
-    let aliqIcms: Money;
+    let aliqResolvida: Money | null = null;
     let modoAliquota: string;
     if (interestadual) {
       if (isImportado(item.origem)) {
-        aliqIcms = new Money('4');
+        aliqResolvida = new Money('4');
         modoAliquota = 'interestadual-importado';
       } else {
         const row = await this.interstate.findActiveAt(ufOrigem, ufDestino, contexto.dataOperacao);
-        if (!row) {
+        if (row) aliqResolvida = new Money(row.aliqNacional);
+        else if (!ajuste?.aliquota) {
           warnings.push(
             `Sem alíquota interestadual cadastrada para ${ufOrigem}→${ufDestino} em ${contexto.dataOperacao.toISOString()}`,
           );
-          return { campos: {}, warnings };
         }
-        aliqIcms = new Money(row.aliqNacional);
         modoAliquota = 'interestadual-nacional';
       }
     } else {
-      if (!rule.aliqIcms) {
+      if (rule.aliqIcms) aliqResolvida = new Money(rule.aliqIcms);
+      else if (!ajuste?.aliquota) {
         warnings.push(
           'Produto sem aliqIcms cadastrada na regra vigente — ICMS próprio não calculado',
         );
-        return { campos: {}, warnings };
       }
-      aliqIcms = new Money(rule.aliqIcms);
       modoAliquota = 'intraestadual-produto';
     }
 
-    let base = baseDefaultItem(item);
+    const aliqIcms = ajusteOu(ajuste?.aliquota, aliqResolvida);
+    if (!aliqIcms) return { campos: {}, warnings };
+    if (ajuste?.aliquota) modoAliquota = 'ajuste-manual';
+
+    let baseCalculada = baseDefaultItem(item);
+    const ipiNaBase = contexto.destinatario.consumidorFinal && !!parcial?.valorIpi;
+    if (ipiNaBase) baseCalculada = baseCalculada.add(parcial!.valorIpi!);
     if (rule.pRedBC) {
       // pRedBC é o PERCENTUAL de redução. base × (1 − pRedBC/100).
       const fator = new Money('1').sub(new Money(rule.pRedBC).div(100));
-      base = base.mul(fator);
+      baseCalculada = baseCalculada.mul(fator);
     }
+    const base = ajusteOu(ajuste?.base, baseCalculada).round(2);
 
-    const valorIcms = base.applyPercent(aliqIcms);
+    // CST 51 — diferimento: o ICMS da operação (vICMSOp) é apurado inteiro, a parcela
+    // diferida (vICMSDif = vICMSOp × pDif) sai do destaque e vICMS = vICMSOp − vICMSDif.
+    // Sem pDif na regra nem no ajuste, NÃO presumimos diferimento (destacar a menor é o erro
+    // pior): sai ICMS integral com aviso para cadastrar o percentual.
+    const valorIcmsOperacao = base.applyPercent(aliqIcms).round(2);
+    let valorIcms = valorIcmsOperacao;
+    let diferimento: { pDif: Money; valorIcmsDif: Money } | null = null;
+    if (rule.cstIcms?.padStart(2, '0') === '51') {
+      const pDif = ajusteOu(ajuste?.pDif, rule.pDif ? new Money(rule.pDif) : null);
+      if (pDif) {
+        const valorIcmsDif = valorIcmsOperacao.applyPercent(pDif).round(2);
+        valorIcms = valorIcmsOperacao.sub(valorIcmsDif);
+        diferimento = { pDif, valorIcmsDif };
+      } else {
+        warnings.push(
+          'CST 51 sem percentual de diferimento na regra do produto — ICMS destacado integralmente. ' +
+            'Cadastre o % de diferimento ou ajuste no modal "Impostos".',
+        );
+      }
+    }
 
     // Desoneração: registra vICMSDeson sem mexer no valorIcms (regra da NF-e).
     let valorIcmsDeson: string | undefined;
@@ -102,22 +152,36 @@ export class CalculadoraIcmsProprio implements ICalculadoraTributo {
 
     return {
       campos: {
-        baseIcms: base.round(2).toString(2),
+        baseIcms: base.toString(2),
         aliqIcms: aliqIcms.round(4).toString(4),
-        valorIcms: valorIcms.round(2).toString(2),
+        valorIcms: valorIcms.toString(2),
+        ...(diferimento
+          ? {
+              valorIcmsOp: valorIcmsOperacao.toString(2),
+              pDif: diferimento.pDif.round(4).toString(4),
+              valorIcmsDif: diferimento.valorIcmsDif.toString(2),
+            }
+          : {}),
         ...(rule.motDesICMS ? { motDesICMS: rule.motDesICMS } : {}),
         ...(valorIcmsDeson ? { valorIcmsDeson } : {}),
       },
       passo: {
         calculadora: this.nome,
-        resumo: `ICMS ${modoAliquota}: base × ${aliqIcms.round(4).toString(4)}%`,
+        resumo:
+          `ICMS ${modoAliquota}: base × ${aliqIcms.round(4).toString(4)}%` +
+          (diferimento
+            ? ` − diferido ${diferimento.pDif.round(4).toString(4)}% (R$ ${diferimento.valorIcmsDif.toString(2)})`
+            : '') +
+          (manual ? ' (ajustado manualmente)' : ''),
         detalhe: {
           ufOrigem,
           ufDestino,
           interestadual,
           importado: isImportado(item.origem),
-          baseAposReducao: base.round(2).toString(2),
+          ipiNaBase,
+          baseAposReducao: base.toString(2),
           aliquota: aliqIcms.round(4).toString(4),
+          ajusteManual: manual,
         },
       },
       warnings,

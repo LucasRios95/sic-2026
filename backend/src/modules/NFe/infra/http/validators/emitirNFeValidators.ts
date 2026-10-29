@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { ajustesTributariosSchema } from '@modules/TaxEngine/infra/http/validators/taxValidators';
+
 import { FinalidadeNFe, TipoOperacao } from '../../../domain/nfe-enums';
 
 const decimalString = z.string().regex(/^-?\d+(\.\d+)?$/, 'Valor decimal inválido');
@@ -98,6 +100,8 @@ export const emitirNFeSchema = z.object({
         // Override do código de ICMS por item (Simples → CSOSN 3 díg.; Normal → CST 2 díg.).
         cstIcms: z.string().regex(/^\d{2}$/, 'CST de ICMS tem 2 dígitos').optional(),
         csosnIcms: z.string().regex(/^\d{3}$/, 'CSOSN tem 3 dígitos').optional(),
+        // Base/alíquota conferidas e ajustadas pelo faturista no modal "Impostos".
+        ajustes: ajustesTributariosSchema.optional(),
       }),
     )
     .min(1),
@@ -162,6 +166,37 @@ export const cancelarNFeSchema = z.object({
 });
 
 export const emitirEpecSchema = z.object({
+  certificateVaultRef: z.string().min(3).max(200),
+});
+
+/**
+ * Carta de Correção Eletrônica. Limites do MOC: `xCorrecao` de 15 a 1000 caracteres.
+ * As regras de negócio (NF-e precisa estar AUTHORIZED, máximo de 20 CC-e) ficam no
+ * use case — aqui só garantimos o formato antes de chegar lá.
+ */
+export const emitirCceSchema = z.object({
+  correcao: z
+    .string()
+    .min(15, 'Texto de correção exige no mínimo 15 caracteres (regra MOC)')
+    .max(1000, 'Texto de correção excede 1000 caracteres (limite do MOC)'),
+  certificateVaultRef: z.string().min(3).max(200),
+});
+
+/**
+ * Inutilização de faixa de numeração. `serie` vai até 999 e `nNF` até 999999999 (leiaute
+ * 4.00). A checagem cruzada (numeroFinal ≥ numeroInicial, faixa ≤ 1000) fica no use case,
+ * que também confere se a faixa está virgem.
+ */
+export const inutilizarNumeracaoSchema = z.object({
+  serie: z.coerce.number().int().min(0).max(999),
+  numeroInicial: z.coerce.number().int().min(1).max(999_999_999),
+  numeroFinal: z.coerce.number().int().min(1).max(999_999_999),
+  justificativa: z
+    .string()
+    .min(15, 'Justificativa exige no mínimo 15 caracteres (regra SEFAZ)')
+    .max(255),
+  /** Ano da inutilização (2 dígitos no XML). Default no use case = ano corrente. */
+  ano: z.coerce.number().int().min(2006).max(2100).optional(),
   certificateVaultRef: z.string().min(3).max(200),
 });
 

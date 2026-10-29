@@ -219,8 +219,10 @@ describe('NFeXmlBuilder', () => {
     const item = doc.itens[0] as Record<string, unknown>;
     delete item.cstIcms;
     item.csosnIcms = '101';
-    item.aliqIcms = '2.5000';
-    item.valorIcms = '2.50';
+    item.aliqIcms = undefined;
+    item.valorIcms = undefined;
+    item.pCredSN = '2.5000';
+    item.valorCredSN = '2.50';
     const xml = builder.build(doc);
     expect(xml).toContain('<ICMSSN101><orig>0</orig><CSOSN>101</CSOSN><pCredSN>2.5000</pCredSN><vCredICMSSN>2.50</vCredICMSSN></ICMSSN101>');
     const errs = new NFeSchemaValidator().validate(xml).filter((e) => !e.message.includes('Signature'));
@@ -234,6 +236,70 @@ describe('NFeXmlBuilder', () => {
     expect(xml).toContain('<vBC>100.00</vBC>');
     expect(xml).toContain('<pICMS>12.0000</pICMS>');
     expect(xml).toContain('<vICMS>12.00</vICMS>');
+  });
+
+  it('CST 20: pRedBC sai ANTES de vBC (ordem do ICMS20) e valida no XSD', () => {
+    const doc = makeDoc();
+    Object.assign(doc.itens[0], { cstIcms: '20', pRedBC: '33.3300', baseIcms: '66.67', valorIcms: '8.00' });
+    const xml = builder.build(doc);
+    expect(xml).toContain('<modBC>3</modBC><pRedBC>33.3300</pRedBC><vBC>66.67</vBC>');
+    const errs = new NFeSchemaValidator().validate(xml).filter((e) => !e.message.includes('Signature'));
+    expect(errs).toEqual([]);
+  });
+
+  it('CST 51 com diferimento: vICMSOp/pDif/vICMSDif entre pICMS e vICMS e valida no XSD', () => {
+    const doc = makeDoc();
+    Object.assign(doc.itens[0], {
+      cstIcms: '51',
+      aliqIcms: '18.0000',
+      baseIcms: '100.00',
+      valorIcmsOp: '18.00',
+      pDif: '33.3300',
+      valorIcmsDif: '6.00',
+      valorIcms: '12.00',
+    });
+    const xml = builder.build(doc);
+    expect(xml).toContain(
+      '<pICMS>18.0000</pICMS><vICMSOp>18.00</vICMSOp><pDif>33.3300</pDif><vICMSDif>6.00</vICMSDif><vICMS>12.00</vICMS>',
+    );
+    const errs = new NFeSchemaValidator().validate(xml).filter((e) => !e.message.includes('Signature'));
+    expect(errs).toEqual([]);
+  });
+
+  it('vTotTrib do item sai como primeiro filho de <imposto> e valida no XSD', () => {
+    const doc = makeDoc();
+    doc.itens[0].valorTotTrib = '21.35';
+    const xml = builder.build(doc);
+    expect(xml).toContain('<imposto><vTotTrib>21.35</vTotTrib><ICMS>');
+    const errs = new NFeSchemaValidator().validate(xml).filter((e) => !e.message.includes('Signature'));
+    expect(errs).toEqual([]);
+  });
+
+  it('CST 00 não emite pRedBC mesmo se a regra trouxer (ICMS00 não tem a tag)', () => {
+    const doc = makeDoc();
+    doc.itens[0].pRedBC = '10.0000';
+    const xml = builder.build(doc);
+    expect(xml).not.toContain('pRedBC');
+    const errs = new NFeSchemaValidator().validate(xml).filter((e) => !e.message.includes('Signature'));
+    expect(errs).toEqual([]);
+  });
+
+  it('CST 10 sem modBCST na regra: emite modBCST=4 (obrigatório) e valida no XSD', () => {
+    const doc = makeDoc();
+    Object.assign(doc.itens[0], {
+      cstIcms: '10',
+      cstIcmsSt: '10',
+      pMVAST: '40.0000',
+      baseIcmsST: '140.00',
+      aliqIcmsST: '18.0000',
+      valorIcmsST: '13.20',
+    });
+    const xml = builder.build(doc);
+    expect(xml).toContain(
+      '<modBCST>4</modBCST><pMVAST>40.0000</pMVAST><vBCST>140.00</vBCST><pICMSST>18.0000</pICMSST><vICMSST>13.20</vICMSST>',
+    );
+    const errs = new NFeSchemaValidator().validate(xml).filter((e) => !e.message.includes('Signature'));
+    expect(errs).toEqual([]);
   });
 
   it('renderiza grupos IBSCBS (RT 2025.002) com estrutura aninhada oficial', () => {

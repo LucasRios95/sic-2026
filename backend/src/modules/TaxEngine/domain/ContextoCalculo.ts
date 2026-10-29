@@ -53,6 +53,37 @@ export interface ItemContexto {
   cfop: string;
   /** Regra tributária vigente do produto na data da operação. */
   taxRule: ProductTaxRule;
+  /**
+   * Ajustes manuais do faturista (modal "Impostos" da emissão). Cada campo informado
+   * substitui o valor que a calculadora resolveria; o valor do tributo é sempre
+   * recalculado como base × alíquota. Ausente = cálculo 100% automático.
+   */
+  ajustes?: AjustesTributariosItem;
+}
+
+/** Base e alíquota (%) digitadas para um tributo. Strings decimais com ponto. */
+export interface AjusteBaseAliquota {
+  base?: string;
+  aliquota?: string;
+}
+
+/**
+ * Ajustes manuais por tributo. Só têm efeito quando o tributo se APLICA ao item (CST,
+ * flags da empresa, operação) — não servem para "ligar" um tributo que o XML não leva.
+ */
+export interface AjustesTributariosItem {
+  /** `pDif` = % de diferimento (só CST 51). */
+  icms?: AjusteBaseAliquota & { pDif?: string };
+  /** `mva` em %; `base` informada dispensa a MVA. */
+  icmsSt?: AjusteBaseAliquota & { mva?: string };
+  ipi?: AjusteBaseAliquota;
+  pis?: AjusteBaseAliquota;
+  cofins?: AjusteBaseAliquota;
+  difal?: { base?: string; aliquotaDestino?: string; aliquotaInterestadual?: string };
+  fcpDestino?: { aliquota?: string };
+  ibsCbs?: { base?: string; aliquotaIbs?: string; aliquotaCbs?: string };
+  /** Crédito de ICMS do Simples (CSOSN 101/201/900): base e alíquota do crédito. */
+  creditoSn?: AjusteBaseAliquota;
 }
 
 /**

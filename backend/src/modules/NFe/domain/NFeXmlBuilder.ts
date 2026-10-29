@@ -232,6 +232,10 @@ export class NFeXmlBuilder {
     prod.ele('indTot').txt('1').up();
 
     const imposto = det.ele('imposto');
+    // vTotTrib (Lei 12.741) é o primeiro filho de <imposto>, antes do grupo ICMS.
+    if (item.valorTotTrib && Number(item.valorTotTrib) > 0) {
+      imposto.ele('vTotTrib').txt(item.valorTotTrib).up();
+    }
     this.appendIcms(imposto, item);
     this.appendIpi(imposto, item);
     this.appendPisCofins(imposto, item);
@@ -260,45 +264,57 @@ export class NFeXmlBuilder {
 
       // Grupos com ST (201/202/203): campos de ST quando informados (ordem do schema).
       if (['201', '202', '203'].includes(csosn) && item.baseIcmsST) {
-        if (item.modBCST !== undefined) group.ele('modBCST').txt(String(item.modBCST)).up();
-        if (item.pMVAST) group.ele('pMVAST').txt(item.pMVAST).up();
-        group.ele('vBCST').txt(item.baseIcmsST).up();
-        if (item.aliqIcmsST) group.ele('pICMSST').txt(item.aliqIcmsST).up();
-        if (item.valorIcmsST) group.ele('vICMSST').txt(item.valorIcmsST).up();
+        this.appendCamposSt(group, item);
       }
 
-      // ICMSSN900 pode carregar ICMS próprio (campos opcionais).
-      if (csosn === '900' && item.baseIcms && item.aliqIcms) {
-        if (item.modBC !== undefined) group.ele('modBC').txt(String(item.modBC)).up();
-        group.ele('vBC').txt(item.baseIcms).up();
-        if (item.pRedBC) group.ele('pRedBC').txt(item.pRedBC).up();
-        group.ele('pICMS').txt(item.aliqIcms).up();
-        group.ele('vICMS').txt(item.valorIcms ?? '0.00').up();
+      // ICMSSN900 pode carregar ICMS próprio e ST (campos opcionais, nessa ordem).
+      if (csosn === '900') {
+        if (item.baseIcms && item.aliqIcms) {
+          if (item.modBC !== undefined) group.ele('modBC').txt(String(item.modBC)).up();
+          group.ele('vBC').txt(item.baseIcms).up();
+          if (item.pRedBC) group.ele('pRedBC').txt(item.pRedBC).up();
+          group.ele('pICMS').txt(item.aliqIcms).up();
+          group.ele('vICMS').txt(item.valorIcms ?? '0.00').up();
+        }
+        if (item.baseIcmsST) this.appendCamposSt(group, item);
       }
 
-      // Crédito do Simples: obrigatório em 101/201; opcional em 900 (quando há alíquota).
+      // Crédito do Simples (CalculadoraCreditoSimples): obrigatório em 101/201 — sem
+      // alíquota cadastrada sai zerado (o motor avisa); opcional em 900 (só quando apurado).
       // ICMSSN102 (102/103/300/400) e ICMSSN500 NÃO têm crédito.
-      if (csosn === '101' || csosn === '201' || (csosn === '900' && item.aliqIcms)) {
-        group.ele('pCredSN').txt(item.aliqIcms ?? '0.0000').up();
-        group.ele('vCredICMSSN').txt(item.valorIcms ?? '0.00').up();
+      if (csosn === '101' || csosn === '201' || (csosn === '900' && item.pCredSN)) {
+        group.ele('pCredSN').txt(item.pCredSN ?? '0.0000').up();
+        group.ele('vCredICMSSN').txt(item.valorCredSN ?? '0.00').up();
       }
       return;
     }
 
     // Regime normal — usa CST.
-    const groupName = `ICMS${item.cstIcms!.padStart(2, '0')}`;
+    const cst = item.cstIcms!.padStart(2, '0');
+    const groupName = `ICMS${cst}`;
     const group = icms.ele(groupName);
     group.ele('orig').txt(String(item.origem)).up();
     group.ele('CST').txt(item.cstIcms!).up();
+    // pRedBC só existe nos grupos com redução de base, e a posição varia: em ICMS20/51/70
+    // vem ANTES de vBC; em ICMS90, depois. ICMS00/10 não têm a tag (emitir dispara 225).
+    const pRedBCAntesVbc = ['20', '51', '70'].includes(cst) && item.pRedBC;
+    const pRedBCDepoisVbc = cst === '90' && item.pRedBC;
     // modBC é OBRIGATÓRIO no schema para os CST com base própria (00,10,20,51,70,90) e
     // deve preceder vBC. Omitir dispara cStat 225 ("Expected is modBC"). Quando a regra
     // não informa, default 3 = Valor da operação (modalidade mais comum).
     if (item.baseIcms) {
       group.ele('modBC').txt(String(item.modBC ?? 3)).up();
+      if (pRedBCAntesVbc) group.ele('pRedBC').txt(item.pRedBC!).up();
       group.ele('vBC').txt(item.baseIcms).up();
+      if (pRedBCDepoisVbc) group.ele('pRedBC').txt(item.pRedBC!).up();
     }
-    if (item.pRedBC) group.ele('pRedBC').txt(item.pRedBC).up();
     if (item.aliqIcms) group.ele('pICMS').txt(item.aliqIcms).up();
+    // ICMS51 com diferimento: vICMSOp → pDif → vICMSDif entre pICMS e vICMS (ordem do XSD).
+    if (cst === '51' && item.valorIcmsOp && item.pDif) {
+      group.ele('vICMSOp').txt(item.valorIcmsOp).up();
+      group.ele('pDif').txt(item.pDif).up();
+      group.ele('vICMSDif').txt(item.valorIcmsDif ?? '0.00').up();
+    }
     if (item.valorIcms) group.ele('vICMS').txt(item.valorIcms).up();
     if (item.pFCP) {
       if (item.baseFCP) group.ele('vBCFCP').txt(item.baseFCP).up();
@@ -306,17 +322,27 @@ export class NFeXmlBuilder {
       if (item.valorFCP) group.ele('vFCP').txt(item.valorFCP).up();
     }
     if (item.cstIcmsSt && item.baseIcmsST) {
-      if (item.modBCST !== undefined) group.ele('modBCST').txt(String(item.modBCST)).up();
-      if (item.pMVAST) group.ele('pMVAST').txt(item.pMVAST).up();
-      group.ele('vBCST').txt(item.baseIcmsST).up();
-      if (item.aliqIcmsST) group.ele('pICMSST').txt(item.aliqIcmsST).up();
-      if (item.valorIcmsST) group.ele('vICMSST').txt(item.valorIcmsST).up();
+      this.appendCamposSt(group, item);
     }
     if (item.motDesICMS !== undefined && item.valorIcmsDeson) {
       group.ele('vICMSDeson').txt(item.valorIcmsDeson).up();
       group.ele('motDesICMS').txt(String(item.motDesICMS)).up();
     }
     if (item.cBenef) group.ele('cBenef').txt(item.cBenef).up();
+  }
+
+  /**
+   * Campos de ST na ordem do schema (modBCST, pMVAST, pRedBCST, vBCST, pICMSST, vICMSST).
+   * modBCST é obrigatório nos grupos com ST; sem modalidade na regra usamos 4 (MVA), que é
+   * como o motor calcula a base.
+   */
+  private appendCamposSt(group: XMLBuilder, item: NFeItem): void {
+    group.ele('modBCST').txt(String(item.modBCST ?? 4)).up();
+    if (item.pMVAST) group.ele('pMVAST').txt(item.pMVAST).up();
+    if (item.pRedBCST) group.ele('pRedBCST').txt(item.pRedBCST).up();
+    group.ele('vBCST').txt(item.baseIcmsST!).up();
+    group.ele('pICMSST').txt(item.aliqIcmsST ?? '0.0000').up();
+    group.ele('vICMSST').txt(item.valorIcmsST ?? '0.00').up();
   }
 
   private appendIcmsUfDest(imposto: XMLBuilder, item: NFeItem): void {

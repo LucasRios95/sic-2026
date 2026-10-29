@@ -37,6 +37,13 @@ export interface ICalculadoraTributo {
   /**
    * Calcula o slice de resultado para o item. Pode fazer I/O (consultar repositórios
    * de tabelas globais). O caller já garantiu `aplica() === true`.
+   *
+   * `parcial` traz o que as calculadoras anteriores do pipeline já apuraram para o item
+   * (ex.: a ST deduz o ICMS próprio; ICMS/ST/DIFAL somam o IPI na base). Somente leitura.
    */
-  calcular(contexto: ContextoCalculo, item: ItemContexto): Promise<CalculadoraSlice>;
+  calcular(
+    contexto: ContextoCalculo,
+    item: ItemContexto,
+    parcial?: Readonly<ResultadoCalculoItem>,
+  ): Promise<CalculadoraSlice>;
 }

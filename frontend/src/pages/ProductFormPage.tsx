@@ -445,6 +445,8 @@ interface TaxRuleFormState {
   csosnIcms: string;
   cstIcms: string;
   aliqIcms: string;
+  /** % de diferimento (só CST 51). Vazio = sem diferimento. */
+  pDif: string;
   cstPis: string;
   aliqPis: string;
   cstCofins: string;
@@ -463,6 +465,7 @@ const EMPTY_TAX_FORM: TaxRuleFormState = {
   csosnIcms: '102',
   cstIcms: '00',
   aliqIcms: '18.0000',
+  pDif: '',
   cstPis: '49',
   aliqPis: '0',
   cstCofins: '49',
@@ -482,6 +485,7 @@ function ruleToForm(rule: ProductTaxRule | undefined): TaxRuleFormState {
     csosnIcms: rule.csosnIcms ?? '102',
     cstIcms: rule.cstIcms ?? '00',
     aliqIcms: rule.aliqIcms ?? '18.0000',
+    pDif: rule.pDif ?? '',
     cstPis: rule.cstPis ?? '49',
     aliqPis: rule.aliqPis ?? '0',
     cstCofins: rule.cstCofins ?? '49',
@@ -571,6 +575,7 @@ function EditProductForm({ productId }: { productId: string }): React.ReactEleme
         csosnIcms: isSimples ? tax.csosnIcms : null,
         cstIcms: isSimples ? null : tax.cstIcms,
         aliqIcms: isSimples ? null : tax.aliqIcms,
+        pDif: !isSimples && tax.cstIcms === '51' && tax.pDif ? tax.pDif : null,
         cstPis: tax.cstPis || null,
         aliqPis: tax.aliqPis || null,
         cstCofins: tax.cstCofins || null,
@@ -787,6 +792,21 @@ function EditProductForm({ productId }: { productId: string }): React.ReactEleme
                       <Label>Alíquota ICMS (%)</Label>
                       <Input value={tax.aliqIcms} onChange={(e) => setTax((f) => ({ ...f, aliqIcms: e.target.value }))} placeholder="18.0000" />
                     </div>
+                    {tax.cstIcms === '51' ? (
+                      <div className="space-y-1 col-span-2">
+                        <Label>Diferimento (%)</Label>
+                        <Input
+                          value={tax.pDif}
+                          onChange={(e) => setTax((f) => ({ ...f, pDif: e.target.value }))}
+                          placeholder="100.0000"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Parcela do ICMS da operação que fica diferida (100 = diferimento total). O
+                          destaque na nota é o ICMS da operação menos a parcela diferida. Em branco, o
+                          ICMS sai integral.
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
                 )}
 

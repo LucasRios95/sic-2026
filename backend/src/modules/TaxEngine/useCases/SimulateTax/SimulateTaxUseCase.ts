@@ -6,7 +6,8 @@ import { IProductTaxRuleRepository } from '@modules/Products/repositories/IProdu
 import { BusinessRuleError, NotFoundError } from '@shared/errors';
 import { IndicadorIE } from '@shared/types/fiscal-enums';
 
-import { ContextoCalculo } from '../../domain/ContextoCalculo';
+import { AjustesTributariosItem, ContextoCalculo } from '../../domain/ContextoCalculo';
+import { aplicarOverrideIcms } from '../../domain/override-icms';
 import { ResultadoCalculoDocumento } from '../../domain/ResultadoCalculo';
 import { MotorTributario } from '../../MotorTributario';
 
@@ -20,6 +21,11 @@ export interface SimulateItem {
   valorSeguro?: string;
   valorOutros?: string;
   cfop: string;
+  /** Override de CST/CSOSN do ICMS (mesmo contrato da emissão). */
+  cstIcms?: string;
+  csosnIcms?: string;
+  /** Ajustes manuais de base/alíquota (modal "Impostos"). */
+  ajustes?: AjustesTributariosItem;
 }
 
 export interface SimulateRequest {
@@ -106,7 +112,10 @@ export class SimulateTaxUseCase {
         valorSeguro: item.valorSeguro,
         valorOutros: item.valorOutros,
         cfop: item.cfop,
-        taxRule: regra,
+        // Mesmo override da emissão: sem ele a prévia calculava com o CST/CSOSN do cadastro
+        // enquanto a nota saía com o código escolhido na tela.
+        taxRule: aplicarOverrideIcms(regra, item, company.crt, produto.codigo),
+        ajustes: item.ajustes,
       });
     }
 

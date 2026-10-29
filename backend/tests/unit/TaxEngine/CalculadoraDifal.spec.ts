@@ -10,6 +10,9 @@ import { IIcmsInternaUfRepository } from '@modules/TaxEngine/repositories/IIcmsI
 import { IInterstateAliquotRepository } from '@modules/TaxEngine/repositories/IInterstateAliquotRepository';
 import { IndicadorIE } from '@shared/types/fiscal-enums';
 
+/** Nenhuma UF com base dupla configurada — cálculo padrão (base única). */
+const semParametros = { findActiveAt: vi.fn(async () => null), upsert: vi.fn() };
+
 function makeContexto(overrides: Partial<ContextoCalculo> = {}): ContextoCalculo {
   return {
     dataOperacao: new Date('2026-06-15T12:00:00Z'),
@@ -72,7 +75,7 @@ describe('CalculadoraDifal', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('SP → AM B2C: DIFAL = 100 × (20% − 7%) = 13.00', async () => {
-    const calc = new CalculadoraDifal(interstateRepo, internaRepo);
+    const calc = new CalculadoraDifal(interstateRepo, internaRepo, semParametros);
     const ctx = makeContexto();
     const item = makeItem();
 
@@ -87,7 +90,7 @@ describe('CalculadoraDifal', () => {
   it('destinatário CONTRIBUINTE: motor pode continuar habilitando, mas aplica() ainda é true (controle pelo cliente final)', () => {
     // DIFAL classicamente só era B2C; com LC 190/2022 também B2B contribuinte em alguns casos.
     // O motor não decide essa parte — quem aplica é a flag `consumidorFinal`.
-    const calc = new CalculadoraDifal(interstateRepo, internaRepo);
+    const calc = new CalculadoraDifal(interstateRepo, internaRepo, semParametros);
     const ctx = makeContexto({
       destinatario: {
         uf: 'AM',
@@ -100,7 +103,7 @@ describe('CalculadoraDifal', () => {
   });
 
   it('empresa sem usaDifal: aplica() retorna false', () => {
-    const calc = new CalculadoraDifal(interstateRepo, internaRepo);
+    const calc = new CalculadoraDifal(interstateRepo, internaRepo, semParametros);
     const ctx = makeContexto({
       empresa: {
         ...makeContexto().empresa,
@@ -112,7 +115,7 @@ describe('CalculadoraDifal', () => {
   });
 
   it('operação intraestadual: aplica() retorna false', () => {
-    const calc = new CalculadoraDifal(interstateRepo, internaRepo);
+    const calc = new CalculadoraDifal(interstateRepo, internaRepo, semParametros);
     const ctx = makeContexto({
       destinatario: {
         uf: 'SP',
@@ -125,10 +128,14 @@ describe('CalculadoraDifal', () => {
   });
 
   it('importado SP → MG B2C: pICMSInter = 4% mesmo sem registro Senado', async () => {
-    const calc = new CalculadoraDifal(interstateRepo, {
-      findActiveAt: vi.fn(async () => ({ aliqInterna: '18.0000', aliqFcp: null }) as IcmsInternaUf),
-      upsert: vi.fn(),
-    });
+    const calc = new CalculadoraDifal(
+      interstateRepo,
+      {
+        findActiveAt: vi.fn(async () => ({ aliqInterna: '18.0000', aliqFcp: null }) as IcmsInternaUf),
+        upsert: vi.fn(),
+      },
+      semParametros,
+    );
     const ctx = makeContexto({
       destinatario: {
         uf: 'MG',

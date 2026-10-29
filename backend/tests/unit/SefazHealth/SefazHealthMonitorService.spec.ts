@@ -25,6 +25,7 @@ function makeStatus(overrides: Partial<SefazHealthStatus> = {}): SefazHealthStat
     consecutiveSuccesses: 5,
     createdAt: new Date(),
     updatedAt: new Date(),
+    ...overrides,
   } as unknown as SefazHealthStatus;
 }
 

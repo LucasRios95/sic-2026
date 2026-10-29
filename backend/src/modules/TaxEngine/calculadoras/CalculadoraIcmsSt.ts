@@ -4,7 +4,15 @@ import { Money } from '@shared/domain/Money';
 
 import { ContextoCalculo, ItemContexto } from '../domain/ContextoCalculo';
 import { CalculadoraSlice, ICalculadoraTributo } from '../domain/ICalculadoraTributo';
-import { baseDefaultItem, isImportado } from '../domain/item-utils';
+import {
+  ajusteOu,
+  baseDefaultItem,
+  CSOSN_COM_ST,
+  CST_COM_ST,
+  isImportado,
+  temAjuste,
+} from '../domain/item-utils';
+import { ResultadoCalculoItem } from '../domain/ResultadoCalculo';
 import { IIcmsInternaUfRepository } from '../repositories/IIcmsInternaUfRepository';
 import { IIcmsStMvaRepository } from '../repositories/IIcmsStMvaRepository';
 import { IInterstateAliquotRepository } from '../repositories/IInterstateAliquotRepository';
@@ -15,14 +23,22 @@ import { IInterstateAliquotRepository } from '../repositories/IInterstateAliquot
  * Cenário do remetente (mais comum): a empresa emitente é a SUBSTITUTA — recolhe o
  * ICMS-ST devido nas operações subsequentes. Fórmula consolidada:
  *
- *   1. Base ST = (vProd + IPI + frete + seguro + outras) × (1 + MVA)
- *   2. ICMS-ST = (Base ST × aliq_interna_destino) − ICMS_proprio_da_operacao
+ *   1. Base ST = (vProd − desc + IPI + frete + seguro + outras) × (1 + MVA) × (1 − pRedBCST)
+ *   2. ICMS-ST = (Base ST × aliq_interna_destino) − ICMS_proprio_da_operacao   (mínimo 0)
+ *
+ * O ICMS próprio deduzido é o que a CalculadoraIcmsProprio apurou para o item (já com
+ * redução de base e ajustes manuais). Quando ela não roda (Simples — CSOSN 201/202/203 —
+ * ou CST 30), recompõe-se o ICMS da operação pela alíquota própria, sobre a base sem IPI.
  *
  * Resolução da MVA:
  *   - Se há regra global em `icms_st_mva` para (UF origem, UF destino, NCM), ela prevalece
  *     sobre `ProductTaxRule.pMVAST`. Quando interestadual, prefere MVA ajustada compatível
  *     com a alíquota interestadual (4/7/12%).
  *   - Sem regra global e sem `pMVAST` no produto → avisa e não calcula.
+ *
+ * Alíquota interna do destino: ajuste manual > `ProductTaxRule.pICMSST` > `icms_interna_uf`.
+ *
+ * Ajustes manuais (`item.ajustes.icmsSt`): `mva`, `base` (dispensa a MVA) e `aliquota`.
  *
  * Empresas sem `usaIcmsSt` saem cedo via `aplica()`.
  */
@@ -43,76 +59,126 @@ export class CalculadoraIcmsSt implements ICalculadoraTributo {
 
   aplica(contexto: ContextoCalculo, item: ItemContexto): boolean {
     if (!contexto.empresa.flags.usaIcmsSt) return false;
-    // Só aplica quando há CST/CSOSN de ST cadastrado no produto.
-    return Boolean(item.taxRule.cstIcmsSt || isCstStOuCsosn(item.taxRule.csosnIcms ?? null));
+    const { csosnIcms, cstIcms, cstIcmsSt } = item.taxRule;
+    // Só aplica quando o grupo de ICMS do item comporta ST calculada nesta operação.
+    // CSOSN 500 / CST 60 são ST já retida antes: calcular aqui somava vST no total sem
+    // existir no item (cStat 534) e inflava o vNF.
+    if (csosnIcms) return CSOSN_COM_ST.includes(csosnIcms);
+    if (!cstIcmsSt) return false;
+    return !cstIcms || CST_COM_ST.includes(cstIcms.padStart(2, '0'));
   }
 
-  async calcular(contexto: ContextoCalculo, item: ItemContexto): Promise<CalculadoraSlice> {
+  async calcular(
+    contexto: ContextoCalculo,
+    item: ItemContexto,
+    parcial?: Readonly<ResultadoCalculoItem>,
+  ): Promise<CalculadoraSlice> {
+    const ajuste = item.ajustes?.icmsSt;
+    const manual = temAjuste(ajuste);
     const ufOrigem = contexto.empresa.uf;
     const ufDestino = contexto.destinatario.uf;
     const interestadual = ufOrigem !== ufDestino;
     const warnings: string[] = [];
 
-    const interna = await this.icmsInterna.findActiveAt(ufDestino, contexto.dataOperacao);
-    if (!interna) {
-      warnings.push(`Sem alíquota interna cadastrada para destino ${ufDestino}`);
-      return { campos: {}, warnings };
-    }
-    const aliqInternaDestino = new Money(interna.aliqInterna);
-
-    // Resolve a MVA aplicável.
-    const mvaPercent = await this.resolveMva(
-      ufOrigem,
-      ufDestino,
-      item.ncm,
-      item.origem,
-      item.taxRule.pMVAST ?? null,
-      interestadual,
-      contexto.dataOperacao,
-      warnings,
-    );
-    if (!mvaPercent) {
-      return { campos: {}, warnings };
+    let aliqInternaDestino: Money;
+    if (ajuste?.aliquota) {
+      aliqInternaDestino = new Money(ajuste.aliquota);
+    } else if (item.taxRule.pICMSST) {
+      // Alíquota de ST do produto prevalece sobre a padrão da UF (ex.: vinho, 25–30%).
+      aliqInternaDestino = new Money(item.taxRule.pICMSST);
+    } else {
+      const interna = await this.icmsInterna.findActiveAt(ufDestino, contexto.dataOperacao);
+      if (!interna) {
+        warnings.push(`Sem alíquota interna cadastrada para destino ${ufDestino}`);
+        return { campos: {}, warnings };
+      }
+      aliqInternaDestino = new Money(interna.aliqInterna);
     }
 
     const baseProduto = baseDefaultItem(item);
-    const fatorMva = new Money('1').add(mvaPercent.div(100));
-    const baseSt = baseProduto.mul(fatorMva);
+    // IPI integra a base da ST como encargo transferível ao adquirente (LC 87/96, art. 8º, II).
+    const baseOperacao = baseProduto.add(parcial?.valorIpi ?? 0);
+    const pRedBCST = item.taxRule.pRedBCST ? new Money(item.taxRule.pRedBCST) : null;
 
-    // ICMS próprio dessa operação (precisa ser recalculado aqui — a CalculadoraIcmsProprio
-    // roda antes no pipeline mas o slice de saída não chega à ST, então recomputamos).
-    const aliqIcmsProprio = await this.resolveAliqIcmsProprio(
-      ufOrigem,
-      ufDestino,
-      interestadual,
-      item.origem,
-      item.taxRule.aliqIcms ?? null,
-      contexto.dataOperacao,
-    );
-    const icmsProprio = baseProduto.applyPercent(aliqIcmsProprio);
-    const icmsSt = baseSt.applyPercent(aliqInternaDestino).sub(icmsProprio);
+    let mvaPercent: Money | null = null;
+    let baseSt: Money;
+    if (ajuste?.base) {
+      baseSt = new Money(ajuste.base).round(2);
+      mvaPercent = ajuste.mva ? new Money(ajuste.mva) : null;
+    } else {
+      mvaPercent = ajuste?.mva
+        ? new Money(ajuste.mva)
+        : await this.resolveMva(
+            ufOrigem,
+            ufDestino,
+            item.ncm,
+            item.origem,
+            item.taxRule.pMVAST ?? null,
+            interestadual,
+            contexto.dataOperacao,
+            warnings,
+          );
+      if (!mvaPercent) {
+        return { campos: {}, warnings };
+      }
+      const fatorMva = new Money('1').add(mvaPercent.div(100));
+      let base = baseOperacao.mul(fatorMva);
+      if (pRedBCST) base = base.mul(new Money('1').sub(pRedBCST.div(100)));
+      baseSt = base.round(2);
+    }
+
+    // ICMS próprio dessa operação: o já apurado no pipeline (inclui pRedBC e ajustes);
+    // senão recompõe pela alíquota própria sobre a base sem IPI.
+    let icmsProprio: Money;
+    if (parcial?.valorIcms) {
+      icmsProprio = new Money(parcial.valorIcms);
+    } else {
+      const aliqIcmsProprio = await this.resolveAliqIcmsProprio(
+        ufOrigem,
+        ufDestino,
+        interestadual,
+        item.origem,
+        item.taxRule.aliqIcms ?? null,
+        contexto.dataOperacao,
+      );
+      icmsProprio = baseProduto.applyPercent(aliqIcmsProprio).round(2);
+    }
+
+    let icmsSt = baseSt.applyPercent(aliqInternaDestino).sub(icmsProprio).round(2);
+    if (!icmsSt.isPositive()) {
+      warnings.push(
+        'ICMS-ST calculado ficou ≤ 0 (ICMS próprio maior que o ICMS da base ST) — zerado. Confira MVA/alíquotas.',
+      );
+      icmsSt = Money.zero();
+    }
 
     return {
       campos: {
-        baseIcmsST: baseSt.round(2).toString(2),
+        baseIcmsST: baseSt.toString(2),
         aliqIcmsST: aliqInternaDestino.round(4).toString(4),
-        valorIcmsST: icmsSt.round(2).toString(2),
-        pMVAST: mvaPercent.round(4).toString(4),
+        valorIcmsST: icmsSt.toString(2),
+        ...(mvaPercent ? { pMVAST: mvaPercent.round(4).toString(4) } : {}),
+        ...(pRedBCST && !ajuste?.base ? { pRedBCST: pRedBCST.round(4).toString(4) } : {}),
         ...(item.taxRule.modBCST !== null && item.taxRule.modBCST !== undefined
           ? { modBCST: item.taxRule.modBCST }
           : {}),
       },
       passo: {
         calculadora: this.nome,
-        resumo: `ST com MVA ${mvaPercent.round(4).toString(4)}% → BaseST × ${aliqInternaDestino.round(4).toString(4)}% − ICMS_próprio`,
+        resumo:
+          `ST ${mvaPercent ? `com MVA ${mvaPercent.round(4).toString(4)}%` : 'base informada'} → ` +
+          `BaseST × ${aliqInternaDestino.round(4).toString(4)}% − ICMS_próprio` +
+          (manual ? ' (ajustado manualmente)' : ''),
         detalhe: {
           ufOrigem,
           ufDestino,
-          mva: mvaPercent.round(4).toString(4),
+          mva: mvaPercent ? mvaPercent.round(4).toString(4) : null,
           baseProduto: baseProduto.round(2).toString(2),
-          baseSt: baseSt.round(2).toString(2),
+          ipiNaBase: parcial?.valorIpi ?? null,
+          baseSt: baseSt.toString(2),
           aliqInternaDestino: aliqInternaDestino.round(4).toString(4),
-          icmsProprio: icmsProprio.round(2).toString(2),
+          icmsProprio: icmsProprio.toString(2),
+          ajusteManual: manual,
         },
       },
       warnings,
@@ -167,13 +233,4 @@ export class CalculadoraIcmsSt implements ICalculadoraTributo {
     const row = await this.interstate.findActiveAt(ufOrigem, ufDestino, dataOperacao);
     return new Money(row?.aliqNacional ?? '0');
   }
-}
-
-/**
- * CSOSNs do Simples que indicam ST: 201, 202, 203 (com ST), 500 (ST cobrada anteriormente),
- * 900 (outros, podem ter ST).
- */
-function isCstStOuCsosn(csosn: string | null): boolean {
-  if (!csosn) return false;
-  return ['201', '202', '203', '500', '900'].includes(csosn);
 }

@@ -47,7 +47,7 @@ function generateSelfSignedPkcs12(password: string): TestCert {
 }
 
 describe('NFeSigner', () => {
-  it('assina e valida em round-trip (canonicalização C14N + RSA-SHA256)', () => {
+  it('assina e valida em round-trip (canonicalização C14N inclusiva + RSA-SHA1)', () => {
     const cert = generateSelfSignedPkcs12('teste123');
     const signer = new NFeSigner();
 
@@ -67,9 +67,14 @@ describe('NFeSigner', () => {
     );
 
     // O round-trip dentro do sign() já valida — se chegou aqui, a assinatura é íntegra.
+    // Os algoritmos são os quatro que o XSD da NF-e 4.00 trava por `fixed value`:
+    // SHA-1 + C14N inclusiva. SHA-256 / exclusive-C14N fazem a SEFAZ rejeitar com
+    // cStat 225 ("Falha no Schema XML do lote"). Ver o comentário no NFeSigner.
     expect(signed).toContain('<Signature');
-    expect(signed).toContain('xmldsig#rsa-sha256'); // algoritmo
-    expect(signed).toContain('xml-exc-c14n#'); // canonicalização
+    expect(signed).toContain('xmldsig#rsa-sha1'); // SignatureMethod
+    expect(signed).toContain('xmldsig#sha1'); // DigestMethod
+    expect(signed).toContain('REC-xml-c14n-20010315'); // canonicalização inclusiva
+    expect(signed).not.toContain('xml-exc-c14n#');
 
     // Confirma que a assinatura quebra ao alterar 1 byte do payload.
     const tampered = signed.replace('<cUF>35</cUF>', '<cUF>31</cUF>');

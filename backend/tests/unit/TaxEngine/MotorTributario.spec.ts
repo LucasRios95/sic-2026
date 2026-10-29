@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CodigoRegimeTributario } from '@modules/Companies/infra/typeorm/entities/Company';
 import { ProductTaxRule } from '@modules/Products/infra/typeorm/entities/ProductTaxRule';
+import { CalculadoraCreditoSimples } from '@modules/TaxEngine/calculadoras/CalculadoraCreditoSimples';
 import { CalculadoraDifal, CalculadoraFcpDestino } from '@modules/TaxEngine/calculadoras/CalculadoraDifal';
 import { CalculadoraIbsCbs } from '@modules/TaxEngine/calculadoras/CalculadoraIbsCbs';
 import { CalculadoraIcmsProprio } from '@modules/TaxEngine/calculadoras/CalculadoraIcmsProprio';
 import { CalculadoraIcmsSt } from '@modules/TaxEngine/calculadoras/CalculadoraIcmsSt';
 import { CalculadoraIpi } from '@modules/TaxEngine/calculadoras/CalculadoraIpi';
 import { CalculadoraPisCofins } from '@modules/TaxEngine/calculadoras/CalculadoraPisCofins';
+import { CalculadoraTributosAproximados } from '@modules/TaxEngine/calculadoras/CalculadoraTributosAproximados';
 import { ContextoCalculo } from '@modules/TaxEngine/domain/ContextoCalculo';
 import { IcmsInternaUf } from '@modules/TaxEngine/infra/typeorm/entities/IcmsInternaUf';
 import { InterstateAliquot } from '@modules/TaxEngine/infra/typeorm/entities/InterstateAliquot';
@@ -59,11 +61,13 @@ function buildMotor(): MotorTributario {
   return new MotorTributario(
     new CalculadoraIcmsProprio(interstateRepo),
     new CalculadoraIcmsSt(stRepo, internaRepo, interstateRepo),
-    new CalculadoraDifal(interstateRepo, internaRepo),
+    new CalculadoraDifal(interstateRepo, internaRepo, paramRepo),
     new CalculadoraFcpDestino(internaRepo),
     new CalculadoraIpi(),
     new CalculadoraPisCofins(paramRepo),
     new CalculadoraIbsCbs(paramRepo),
+    new CalculadoraCreditoSimples(paramRepo),
+    new CalculadoraTributosAproximados(paramRepo),
   );
 }
 
