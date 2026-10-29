@@ -12,6 +12,7 @@ import { SefazHealthState } from '@modules/SefazHealth/domain/sefaz-health-enums
 import { SefazHealthMonitorService } from '@modules/SefazHealth/SefazHealthMonitorService';
 import { AjustesTributariosItem, ContextoCalculo } from '@modules/TaxEngine/domain/ContextoCalculo';
 import { aplicarOverrideIcms } from '@modules/TaxEngine/domain/override-icms';
+import { ResultadoCalculoItem } from '@modules/TaxEngine/domain/ResultadoCalculo';
 import { MotorTributario } from '@modules/TaxEngine/MotorTributario';
 import { CertificateAccessor } from '@shared/container/providers/CertificateVault/CertificateAccessor';
 import { BusinessRuleError, IntegrationError, NotFoundError } from '@shared/errors';
@@ -47,9 +48,10 @@ export { aplicarOverrideIcms };
  * Fluxo:
  *  1. Idempotência — se já existe NFe com a mesma `idempotencyKey`, retorna ela.
  *  2. Carrega empresa, cliente, produtos + regras tributárias vigentes.
- *  3. Reserva número de forma atômica via NumberingSeries (lock pessimista).
- *  4. Compõe ChaveAcesso (44 dígitos + DV mod11).
- *  5. Chama MotorTributario para calcular todos os tributos por item + totais.
+ *  3. Chama MotorTributario para calcular todos os tributos por item + totais (antes do
+ *     número, para que erro de configuração não consuma numeração).
+ *  4. Reserva número de forma atômica via NumberingSeries (lock pessimista).
+ *  5. Compõe ChaveAcesso (44 dígitos + DV mod11).
  *  6. Persiste NFe agregada (cabeçalho + items + pagamentos) com status PENDING.
  *  7. Compõe XML via NFeXmlBuilder.
  *  8. Assina via NFeSigner (xml-crypto + C14N + RSA-SHA256, round-trip incluído).
@@ -153,82 +155,8 @@ export class EmitirNFeUseCase {
     const ano = dhEmissao.getUTCFullYear();
     const mes = dhEmissao.getUTCMonth() + 1;
 
-    // 3) Reserva número de forma atômica. Se o faturista informou um número
-    // explicito no payload (`request.numero`), tentamos honrar -- usado em
-    // re-alinhamento com talao fisico ou ao preencher buracos de escrituracao.
-    // Senao, alocamos o proximo automaticamente.
-    //
-    // ATENCAO ao "reuso": se ja existe NFe nesse (modelo, serie, numero) MAS
-    // em status que NAO consumiu numero fiscal (REJECTED/PENDING/DRAFT — nunca
-    // chegou a virar nota valida na SEFAZ), descartamos a antiga e liberamos o
-    // slot. Status AUTHORIZED/PROCESSING/CANCELLED/DENIED consomem oficialmente
-    // (precisam de Inutilizacao para reuso) — nesses, mantemos o erro.
-    await this.numberingRepository.ensureSeries(company.id, '55', request.serie);
-    let slotReleased = false;
-    if (request.numero) {
-      const existing = await this.nfeRepository.findByScope(
-        company.id,
-        '55',
-        request.serie,
-        request.numero,
-      );
-      const REUSABLE_STATUSES = ['REJECTED', 'PENDING', 'SUBMITTED', 'DRAFT', 'ERROR'];
-      if (existing && REUSABLE_STATUSES.includes(existing.status)) {
-        // NFe rejeitada/pendente no mesmo slot — descarta pra reusar a numeracao.
-        await this.nfeRepository.hardDelete(existing.id);
-        slotReleased = true;
-      } else if (!existing) {
-        // Slot vago. Pode estar vago porque (a) numero >= proximoNumero (caso normal),
-        // ou (b) NFe anterior foi excluida via DELETE /nfe/:id (numero < proximoNumero).
-        // No caso (b), `allocateSpecificNumber` rejeitaria com NUMBERING_SERIES_NUMBER_USED
-        // porque a serie ja avancou. Detectamos via peek e pulamos o allocate.
-        const peek = await this.numberingRepository.peekProximoNumero(
-          company.id,
-          '55',
-          request.serie,
-        );
-        if (BigInt(request.numero) < BigInt(peek)) {
-          slotReleased = true;
-        }
-      }
-    }
-    // Quando o slot foi liberado (NFe rejeitada/pendente descartada), evitamos
-    // `allocateSpecificNumber` porque ele bloqueia numeros abaixo do proximoNumero
-    // — o que e correto pro caso geral, mas conflita com reuso de slot livre.
-    // O INSERT subsequente respeita a unique constraint do banco; se houver race,
-    // a constraint pega.
-    const allocated = slotReleased
-      ? { numero: request.numero!, serie: request.serie, modelo: '55' }
-      : request.numero
-        ? await this.numberingRepository.allocateSpecificNumber(
-            company.id,
-            '55',
-            request.serie,
-            request.numero,
-          )
-        : await this.numberingRepository.allocateNumber(company.id, '55', request.serie);
-
-    // 3a) EP-06c — decide forma de emissão consultando o monitor de saúde SEFAZ.
-    //     Quando a autorizadora normal está DOWN e a SVC está UP/DEGRADED, roteamos para
-    //     SVC e marcamos `formaEmissao = CONTINGENCIA_SVC_AN/RS`. `tpEmis` na chave
-    //     precisa refletir essa decisão antes da composição.
-    const formaEmissao = await this.decideFormaEmissao(company.uf, company.ambienteSefaz);
-
-    // 4) Compõe ChaveAcesso
-    const codigoNumerico = ChaveAcesso.generateCodigoNumerico();
-    const chave = ChaveAcesso.build({
-      ufEmitente: company.uf,
-      anoEmissao: ano,
-      mesEmissao: mes,
-      cnpjEmitente: company.cnpj,
-      modelo: '55',
-      serie: allocated.serie,
-      numero: Number(allocated.numero),
-      tipoEmissao: Number(FORMA_EMISSAO_CODIGO[formaEmissao]),
-      codigoNumerico,
-    });
-
-    // 5) Motor tributário — calcula tributos por item
+    // 3) Motor tributário — calcula tributos por item. Roda ANTES de reservar o número:
+    //    erro de configuração barrado aqui não pode consumir número (viraria inutilização).
     const itensCtx = [];
     // Coleta problemas de configuração tributária dos produtos para avisar de uma vez,
     // ANTES de assinar/transmitir — evita descobrir um a um via rejeição da SEFAZ.
@@ -308,9 +236,97 @@ export class EmitirNFeUseCase {
     };
     const calculo = await this.motorTributario.calcular(contexto);
 
+    const errosSt = itensCtx.flatMap((it, idx) =>
+      validarStCalculada(
+        it.taxRule,
+        calculo.itens[idx],
+        it.__sourceItem.product.codigo,
+        it.ncm,
+        customer.uf,
+      ),
+    );
+    if (errosSt.length > 0) {
+      throw new BusinessRuleError(errosSt.join(' · '), 'INVALID_PRODUCT_TAX_CONFIG');
+    }
+
     // Textos legais que dependem do cálculo (crédito do Simples, Lei 12.741) vão para o
     // infCpl ANTES de persistir/serializar — entidade, XML e DANFE saem iguais.
     request.infCpl = appendInfoTributariaToInfCpl(request.infCpl, calculo, company.crt);
+
+    // 4) Reserva número de forma atômica. Se o faturista informou um número
+    // explicito no payload (`request.numero`), tentamos honrar -- usado em
+    // re-alinhamento com talao fisico ou ao preencher buracos de escrituracao.
+    // Senao, alocamos o proximo automaticamente.
+    //
+    // ATENCAO ao "reuso": se ja existe NFe nesse (modelo, serie, numero) MAS
+    // em status que NAO consumiu numero fiscal (REJECTED/PENDING/DRAFT — nunca
+    // chegou a virar nota valida na SEFAZ), descartamos a antiga e liberamos o
+    // slot. Status AUTHORIZED/PROCESSING/CANCELLED/DENIED consomem oficialmente
+    // (precisam de Inutilizacao para reuso) — nesses, mantemos o erro.
+    await this.numberingRepository.ensureSeries(company.id, '55', request.serie);
+    let slotReleased = false;
+    if (request.numero) {
+      const existing = await this.nfeRepository.findByScope(
+        company.id,
+        '55',
+        request.serie,
+        request.numero,
+      );
+      const REUSABLE_STATUSES = ['REJECTED', 'PENDING', 'SUBMITTED', 'DRAFT', 'ERROR'];
+      if (existing && REUSABLE_STATUSES.includes(existing.status)) {
+        // NFe rejeitada/pendente no mesmo slot — descarta pra reusar a numeracao.
+        await this.nfeRepository.hardDelete(existing.id);
+        slotReleased = true;
+      } else if (!existing) {
+        // Slot vago. Pode estar vago porque (a) numero >= proximoNumero (caso normal),
+        // ou (b) NFe anterior foi excluida via DELETE /nfe/:id (numero < proximoNumero).
+        // No caso (b), `allocateSpecificNumber` rejeitaria com NUMBERING_SERIES_NUMBER_USED
+        // porque a serie ja avancou. Detectamos via peek e pulamos o allocate.
+        const peek = await this.numberingRepository.peekProximoNumero(
+          company.id,
+          '55',
+          request.serie,
+        );
+        if (BigInt(request.numero) < BigInt(peek)) {
+          slotReleased = true;
+        }
+      }
+    }
+    // Quando o slot foi liberado (NFe rejeitada/pendente descartada), evitamos
+    // `allocateSpecificNumber` porque ele bloqueia numeros abaixo do proximoNumero
+    // — o que e correto pro caso geral, mas conflita com reuso de slot livre.
+    // O INSERT subsequente respeita a unique constraint do banco; se houver race,
+    // a constraint pega.
+    const allocated = slotReleased
+      ? { numero: request.numero!, serie: request.serie, modelo: '55' }
+      : request.numero
+        ? await this.numberingRepository.allocateSpecificNumber(
+            company.id,
+            '55',
+            request.serie,
+            request.numero,
+          )
+        : await this.numberingRepository.allocateNumber(company.id, '55', request.serie);
+
+    // 4a) EP-06c — decide forma de emissão consultando o monitor de saúde SEFAZ.
+    //     Quando a autorizadora normal está DOWN e a SVC está UP/DEGRADED, roteamos para
+    //     SVC e marcamos `formaEmissao = CONTINGENCIA_SVC_AN/RS`. `tpEmis` na chave
+    //     precisa refletir essa decisão antes da composição.
+    const formaEmissao = await this.decideFormaEmissao(company.uf, company.ambienteSefaz);
+
+    // 5) Compõe ChaveAcesso
+    const codigoNumerico = ChaveAcesso.generateCodigoNumerico();
+    const chave = ChaveAcesso.build({
+      ufEmitente: company.uf,
+      anoEmissao: ano,
+      mesEmissao: mes,
+      cnpjEmitente: company.cnpj,
+      modelo: '55',
+      serie: allocated.serie,
+      numero: Number(allocated.numero),
+      tipoEmissao: Number(FORMA_EMISSAO_CODIGO[formaEmissao]),
+      codigoNumerico,
+    });
 
     // 6) Persiste NFe + items + pagamentos com status PENDING (sem XML ainda)
     const operacaoInterestadual = customer.uf !== company.uf;
@@ -1287,6 +1303,54 @@ export function validarTributacaoItem(
   }
 
   return erros;
+}
+
+/**
+ * Grupos de ICMS em que os campos de ST (modBCST, vBCST, pICMSST, vICMSST) são OBRIGATÓRIOS
+ * no XSD. ICMS90/ICMSSN900 também comportam ST, mas como campos opcionais.
+ */
+const CSOSN_ST_OBRIGATORIA = ['201', '202', '203'];
+const CST_ST_OBRIGATORIA = ['10', '30', '70'];
+
+/**
+ * Confere, depois do motor, se o item cujo CST/CSOSN exige ST saiu com a ST calculada. Sem
+ * MVA (ou com ST desligada na empresa) o motor só avisa, e o builder geraria o grupo sem os
+ * campos de ST → cStat 225 ("Expected is modBCST"). Base de ST zerada passa no XSD, mas é
+ * incoerente com um código que declara ST retida — também barramos.
+ */
+export function validarStCalculada(
+  rule: { cstIcms?: string | null; csosnIcms?: string | null },
+  resultado: Pick<ResultadoCalculoItem, 'baseIcmsST' | 'warnings' | 'calculadorasNaoAplicadas'>,
+  codigoProduto: string,
+  ncm: string,
+  ufDestino: string,
+): string[] {
+  const codigo = rule.csosnIcms
+    ? CSOSN_ST_OBRIGATORIA.includes(rule.csosnIcms) && `CSOSN ${rule.csosnIcms}`
+    : rule.cstIcms &&
+      CST_ST_OBRIGATORIA.includes(rule.cstIcms.padStart(2, '0')) &&
+      `CST ${rule.cstIcms}`;
+  if (!codigo) return [];
+
+  const sugestao = rule.csosnIcms ? 'CSOSN sem ST (ex.: 102)' : 'CST sem ST (ex.: 00)';
+  if (!resultado.baseIcmsST) {
+    const motivo =
+      resultado.calculadorasNaoAplicadas['icms-st'] ??
+      resultado.warnings.find((w) => /MVA|alíquota interna/.test(w)) ??
+      'ICMS-ST não calculado';
+    return [
+      `Produto ${codigoProduto} (NCM ${ncm}): ${codigo} exige ICMS-ST, mas a ST não foi ` +
+        `calculada para ${ufDestino} — ${motivo}. Cadastre a MVA/alíquota de ST do produto ` +
+        `ou use ${sugestao}.`,
+    ];
+  }
+  if (!Number(resultado.baseIcmsST)) {
+    return [
+      `Produto ${codigoProduto} (NCM ${ncm}): ${codigo} com base de ICMS-ST zerada — ` +
+        `confira o ajuste manual da ST ou use ${sugestao}.`,
+    ];
+  }
+  return [];
 }
 
 function ajustarCfopOperacao(
