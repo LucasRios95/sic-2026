@@ -21,9 +21,14 @@ import { TODAS_UFS } from '../tax-globals';
  *   ncms              NCMs separados por `|`. Com 8 dígitos entra como está; com menos,
  *                     expande para todas as folhas de 8 dígitos vigentes na tabela NCM.
  *   mva_original      MVA original em % (ex.: 29.04).
+ *   mva_original_importado  Opcional: MVA original própria de mercadoria importada (ex.: MG);
+ *                     é a base da MVA ajustada 4%. Vazia → usa mva_original.
  *   aliq_interna_dest Alíquota interna do produto no destino, em %, para a MVA ajustada.
  *                     Vazia → usa `icms_interna_uf` vigente em valid_from.
  *   ajusta_mva        S | N — se a UF destino exige MVA ajustada nas interestaduais.
+ *   mva_aj_4, mva_aj_7, mva_aj_12  Opcionais: MVA ajustada PUBLICADA pela UF destino.
+ *                     Quando preenchidas, prevalecem sobre a fórmula (evita divergência
+ *                     de arredondamento com a tabela oficial).
  *   descricao, protocolo, valid_from (AAAA-MM-DD), valid_to (vazio = aberta), fonte_norma.
  *
  * MVA ajustada (Conv. ICMS 142/2018, cl. 13ª; antigo Conv. 35/2011):
@@ -56,8 +61,10 @@ interface Regra {
   ufsOrigem: string[];
   ncms: string[];
   mvaOriginal: number;
+  mvaOriginalImportado: number | null;
   aliqInternaDest: number | null;
   ajustaMva: boolean;
+  publicadas: Record<4 | 7 | 12, number | null>;
   descricao: string | null;
   protocolo: string | null;
   validFrom: string;
@@ -149,6 +156,11 @@ function parseRegras(text: string): Regra[] {
       throw new Error(`linha ${linha}: valid_from deve ser AAAA-MM-DD ("${validFrom}")`);
     }
     const aliq = txt(col(r, 'aliq_interna_dest'));
+    const mvaImp = txt(col(r, 'mva_original_importado'));
+    const publicada = (nome: string) => {
+      const v = txt(col(r, nome));
+      return v === null ? null : num(v, nome, linha);
+    };
     return {
       linha,
       status: col(r, 'status').trim().toUpperCase(),
@@ -156,8 +168,10 @@ function parseRegras(text: string): Regra[] {
       ufsOrigem,
       ncms: expandirNcms(col(r, 'ncms'), linha),
       mvaOriginal: num(col(r, 'mva_original'), 'mva_original', linha),
+      mvaOriginalImportado: mvaImp === null ? null : num(mvaImp, 'mva_original_importado', linha),
       aliqInternaDest: aliq === null ? null : num(aliq, 'aliq_interna_dest', linha),
       ajustaMva: col(r, 'ajusta_mva').trim().toUpperCase() === 'S',
+      publicadas: { 4: publicada('mva_aj_4'), 7: publicada('mva_aj_7'), 12: publicada('mva_aj_12') },
       descricao: txt(col(r, 'descricao')),
       protocolo: txt(col(r, 'protocolo')),
       validFrom,
@@ -206,6 +220,10 @@ function mvaAjustada(mvaOriginal: number, aliqInter: number, aliqIntra: number):
 }
 
 function expandir(regra: Regra, aliqIntra: number): LinhaMva[] {
+  const ajustada = (aliqInter: 4 | 7 | 12, mvaBase: number) => {
+    const pub = regra.publicadas[aliqInter];
+    return pub !== null ? pub.toFixed(4) : mvaAjustada(mvaBase, aliqInter, aliqIntra);
+  };
   const linhas: LinhaMva[] = [];
   for (const ufOrigem of regra.ufsOrigem) {
     const interestadual = ufOrigem !== regra.ufDestino;
@@ -219,10 +237,10 @@ function expandir(regra: Regra, aliqIntra: number): LinhaMva[] {
         ncm,
         descricao: regra.descricao,
         mvaOriginal: regra.mvaOriginal.toFixed(4),
-        mvaAjustada4: ajusta ? mvaAjustada(regra.mvaOriginal, 4, aliqIntra) : null,
+        mvaAjustada4: ajusta ? ajustada(4, regra.mvaOriginalImportado ?? regra.mvaOriginal) : null,
         // Só a alíquota interestadual do par se aplica; a outra fica nula.
-        mvaAjustada7: ajusta && aliqNacional === 7 ? mvaAjustada(regra.mvaOriginal, 7, aliqIntra) : null,
-        mvaAjustada12: ajusta && aliqNacional === 12 ? mvaAjustada(regra.mvaOriginal, 12, aliqIntra) : null,
+        mvaAjustada7: ajusta && aliqNacional === 7 ? ajustada(7, regra.mvaOriginal) : null,
+        mvaAjustada12: ajusta && aliqNacional === 12 ? ajustada(12, regra.mvaOriginal) : null,
         protocolo: regra.protocolo,
         validFrom: regra.validFrom,
         validTo: regra.validTo,
