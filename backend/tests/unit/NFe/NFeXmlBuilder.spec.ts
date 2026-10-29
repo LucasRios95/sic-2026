@@ -284,6 +284,27 @@ describe('NFeXmlBuilder', () => {
     expect(errs).toEqual([]);
   });
 
+  it('transportadora sai na ordem do XSD (xNome antes de IE) e valida', () => {
+    const doc = makeDoc();
+    doc.transporte = {
+      modalidadeFrete: 1,
+      transportadora: {
+        cnpjCpf: '25.412.222/0001-42',
+        nome: 'TRANSPORTADORA TESTE LTDA',
+        ie: '112332867113',
+        endereco: 'RUA PAULO EMILIO, 111',
+        municipio: 'SAO PAULO',
+        uf: 'SP',
+      },
+    };
+    const xml = builder.build(doc);
+    expect(xml).toContain(
+      '<transporta><CNPJ>25412222000142</CNPJ><xNome>TRANSPORTADORA TESTE LTDA</xNome><IE>112332867113</IE>',
+    );
+    const errs = new NFeSchemaValidator().validate(xml).filter((e) => !e.message.includes('Signature'));
+    expect(errs).toEqual([]);
+  });
+
   it('CST 10 sem modBCST na regra: emite modBCST=4 (obrigatório) e valida no XSD', () => {
     const doc = makeDoc();
     Object.assign(doc.itens[0], {

@@ -537,8 +537,9 @@ export class NFeXmlBuilder {
         if (digits.length === 14) tr.ele('CNPJ').txt(digits).up();
         else if (digits.length === 11) tr.ele('CPF').txt(digits).up();
       }
-      if (t.transportadora.ie) tr.ele('IE').txt(t.transportadora.ie).up();
+      // Ordem do XSD: CNPJ/CPF → xNome → IE → xEnder → xMun → UF (IE antes de xNome = 225).
       if (t.transportadora.nome) tr.ele('xNome').txt(t.transportadora.nome).up();
+      if (t.transportadora.ie) tr.ele('IE').txt(t.transportadora.ie).up();
       if (t.transportadora.endereco) tr.ele('xEnder').txt(t.transportadora.endereco).up();
       if (t.transportadora.municipio) tr.ele('xMun').txt(t.transportadora.municipio).up();
       if (t.transportadora.uf) tr.ele('UF').txt(t.transportadora.uf).up();
