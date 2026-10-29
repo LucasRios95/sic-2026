@@ -305,6 +305,22 @@ describe('NFeXmlBuilder', () => {
     expect(errs).toEqual([]);
   });
 
+  it('valores digitados saem com as casas exatas do XSD (pesos 3, valores 2) e validam', () => {
+    const doc = makeDoc();
+    doc.transporte = {
+      modalidadeFrete: 1,
+      volumes: [{ quantidade: 31, especie: 'VOLUMES', pesoLiquido: '223.5', pesoBruto: '232,5' }],
+    };
+    Object.assign(doc.itens[0], { valorFrete: '10.5', valorDesconto: '2' });
+    doc.pagamentos = [{ meio: '15', valor: '108.5' }];
+    const xml = builder.build(doc);
+    expect(xml).toContain('<pesoL>223.500</pesoL><pesoB>232.500</pesoB>');
+    expect(xml).toContain('<vFrete>10.50</vFrete><vDesc>2.00</vDesc>');
+    expect(xml).toContain('<vPag>108.50</vPag>');
+    const errs = new NFeSchemaValidator().validate(xml).filter((e) => !e.message.includes('Signature'));
+    expect(errs).toEqual([]);
+  });
+
   it('CST 10 sem modBCST na regra: emite modBCST=4 (obrigatório) e valida no XSD', () => {
     const doc = makeDoc();
     Object.assign(doc.itens[0], {

@@ -2,6 +2,7 @@ import { create } from 'xmlbuilder2';
 import type { XMLBuilder } from 'xmlbuilder2/lib/interfaces';
 
 import { AmbienteSefaz, CodigoRegimeTributario } from '@modules/Companies/infra/typeorm/entities/Company';
+import { Money } from '@shared/domain/Money';
 import {
   CstIbsCbs,
   IndicadorIE,
@@ -225,10 +226,10 @@ export class NFeXmlBuilder {
     prod.ele('uTrib').txt(item.unidadeTributavel).up();
     prod.ele('qTrib').txt(item.quantidadeTributavel).up();
     prod.ele('vUnTrib').txt(item.valorUnitarioTrib).up();
-    if (item.valorFrete) prod.ele('vFrete').txt(item.valorFrete).up();
-    if (item.valorSeguro) prod.ele('vSeg').txt(item.valorSeguro).up();
-    if (item.valorDesconto) prod.ele('vDesc').txt(item.valorDesconto).up();
-    if (item.valorOutros) prod.ele('vOutro').txt(item.valorOutros).up();
+    if (item.valorFrete) prod.ele('vFrete').txt(dec(item.valorFrete, 2)).up();
+    if (item.valorSeguro) prod.ele('vSeg').txt(dec(item.valorSeguro, 2)).up();
+    if (item.valorDesconto) prod.ele('vDesc').txt(dec(item.valorDesconto, 2)).up();
+    if (item.valorOutros) prod.ele('vOutro').txt(dec(item.valorOutros, 2)).up();
     prod.ele('indTot').txt('1').up();
 
     const imposto = det.ele('imposto');
@@ -559,8 +560,8 @@ export class NFeXmlBuilder {
         if (vol.especie) v.ele('esp').txt(vol.especie).up();
         if (vol.marca) v.ele('marca').txt(vol.marca).up();
         if (vol.numeracao) v.ele('nVol').txt(vol.numeracao).up();
-        if (vol.pesoLiquido) v.ele('pesoL').txt(vol.pesoLiquido).up();
-        if (vol.pesoBruto) v.ele('pesoB').txt(vol.pesoBruto).up();
+        if (vol.pesoLiquido) v.ele('pesoL').txt(dec(vol.pesoLiquido, 3)).up();
+        if (vol.pesoBruto) v.ele('pesoB').txt(dec(vol.pesoBruto, 3)).up();
       }
     }
   }
@@ -578,7 +579,7 @@ export class NFeXmlBuilder {
       // tPag=90 (Sem pagamento) — ex.: devolução/remessa. A SEFAZ exige vPag=0.00 nesse
       // caso; informar o valor real dispara cStat 904 ("valor de pagamento informado
       // indevidamente"). Demais meios usam o valor real (a soma deve fechar com o vNF).
-      det.ele('vPag').txt(p.meio === '90' ? '0.00' : p.valor).up();
+      det.ele('vPag').txt(p.meio === '90' ? '0.00' : dec(p.valor, 2)).up();
       if (p.bandeira) {
         const card = det.ele('card');
         card.ele('tpIntegra').txt('2').up();
@@ -690,6 +691,16 @@ function cofinsGroupName(cst: string): string {
   if (cst === '03') return 'COFINSQtde';
   if (['04', '05', '06', '07', '08', '09'].includes(cst)) return 'COFINSNT';
   return 'COFINSOutr';
+}
+
+/**
+ * Decimal com o número EXATO de casas do tipo XSD (TDec_1302 = 2 casas; TDec_1203 = 3 casas
+ * em pesoL/pesoB). Valores digitados chegam como '223.5', 223.5 ou '223,5' e o pattern do
+ * XSD rejeita casas faltando (cStat 225). Todo valor digitado pelo usuário passa por aqui;
+ * os calculados pelo motor já saem formatados.
+ */
+function dec(value: string | number, casas: number): string {
+  return new Money(String(value).trim().replace(',', '.')).toString(casas);
 }
 
 function hasTransportadoraData(t: NonNullable<NFeDocument['transporte']['transportadora']>): boolean {
