@@ -18,7 +18,9 @@ import type { TaxSimulationItem, TaxSimulationResult } from '@/shared/types/fisc
 import {
   contarAjustes,
   erroCampo,
+  INFORMATIVOS,
   limparAjustes,
+  motivoNaoAplica,
   paraInput,
   TRIBUTOS,
   type AjustesDigitados,
@@ -48,21 +50,10 @@ interface Props {
   onAplicar: (ajustesPorLinha: Record<string, AjustesDigitados>) => void;
 }
 
-const NOME_CALCULADORA: Record<string, string> = {
-  'icms-proprio': 'ICMS',
-  'icms-st': 'ICMS-ST',
-  ipi: 'IPI',
-  'pis-cofins': 'PIS/COFINS',
-  difal: 'DIFAL',
-  'fcp-destino': 'FCP destino',
-  'credito-sn': 'Crédito ICMS do Simples',
-  'ibs-cbs': 'IBS/CBS',
-};
-
 /**
- * Modal "Impostos": mostra, item a item, base, alíquota e valor de cada tributo calculado
- * pelo motor e deixa o faturista digitar base/alíquota (e MVA/alíquota interestadual) para
- * recalcular. Os valores e totais exibidos são SEMPRE os devolvidos pelo backend — o mesmo
+ * Modal "Impostos": mostra, item a item, TODOS os tributos — os calculados pelo motor com
+ * base, alíquota e valor editáveis (e MVA/alíquota interestadual), e os que não se aplicam
+ * com o motivo devolvido pelo motor. O faturista digita base/alíquota para recalcular. Os valores e totais exibidos são SEMPRE os devolvidos pelo backend — o mesmo
  * cálculo que vai para o XML na emissão.
  *
  * Edição é em rascunho local: só "Recalcular" aplica nas linhas da nota. Campo apagado
@@ -229,11 +220,12 @@ function ItemConferencia({
   onRestaurar: () => void;
   onEnter: () => void;
 }): React.ReactElement {
-  const aplicaveis = TRIBUTOS.filter((t) => resultado?.calculadorasAplicadas.includes(t.calculadora));
+  const aplicada = (calculadora: string) =>
+    resultado?.calculadorasAplicadas.includes(calculadora) ?? false;
   // Crédito do Simples só é notícia para empresa do Simples.
-  const naoAplicaveis = Object.keys(NOME_CALCULADORA).filter(
-    (c) =>
-      !resultado?.calculadorasAplicadas.includes(c) && (c !== 'credito-sn' || isSimples),
+  const tributos = TRIBUTOS.filter((t) => t.calculadora !== 'credito-sn' || isSimples);
+  const informativos = INFORMATIVOS.filter(
+    (i) => !i.somenteComValor || (resultado && lerResultado(resultado, i.valor)),
   );
   const codigoIcms = resultado?.codigos.csosnIcms
     ? `CSOSN ${resultado.codigos.csosnIcms}`
@@ -285,7 +277,16 @@ function ItemConferencia({
               </tr>
             </thead>
             <tbody>
-              {aplicaveis.map((t) => {
+              {tributos.map((t) => {
+                if (!aplicada(t.calculadora)) {
+                  return (
+                    <LinhaNaoAplicada
+                      key={t.id}
+                      rotulo={t.rotulo}
+                      motivo={motivoNaoAplica(resultado, t.calculadora)}
+                    />
+                  );
+                }
                 const bloqueio = t.bloqueio?.(resultado) ?? null;
                 return (
                   <tr key={t.id} className="border-t border-border/60 align-top">
@@ -340,17 +341,27 @@ function ItemConferencia({
                   </tr>
                 );
               })}
+              {informativos.map((i) =>
+                aplicada(i.calculadora) ? (
+                  <tr key={i.id} className="border-t border-border/60 align-top">
+                    <td className="py-1.5 pr-2 font-medium">{i.rotulo}</td>
+                    <td colSpan={3} className="py-1.5 pr-2 text-xs text-muted-foreground">
+                      {i.detalhe?.(resultado) ?? 'Somente leitura'}
+                    </td>
+                    <td className="py-1.5 text-right font-medium tabular-nums">
+                      {formatDecimal(lerResultado(resultado, i.valor), { fallback: '—' })}
+                    </td>
+                  </tr>
+                ) : (
+                  <LinhaNaoAplicada
+                    key={i.id}
+                    rotulo={i.rotulo}
+                    motivo={motivoNaoAplica(resultado, i.calculadora)}
+                  />
+                ),
+              )}
             </tbody>
           </table>
-
-          <p className="mt-2 text-xs text-muted-foreground">
-            {isSimples && resultado.codigos.csosnIcms
-              ? 'Simples Nacional: ICMS próprio recolhido no DAS, sem destaque na nota. '
-              : null}
-            {naoAplicaveis.length > 0
-              ? `Não se aplicam a este item: ${naoAplicaveis.map((c) => NOME_CALCULADORA[c]).join(', ')}.`
-              : null}
-          </p>
 
           {resultado.warnings.length > 0 ? (
             <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
@@ -375,6 +386,19 @@ function ItemConferencia({
         </div>
       )}
     </section>
+  );
+}
+
+/** Tributo que o motor não aplicou ao item: só o motivo, sem campos editáveis. */
+function LinhaNaoAplicada({ rotulo, motivo }: { rotulo: string; motivo: string }): React.ReactElement {
+  return (
+    <tr className="border-t border-border/60 align-top text-muted-foreground">
+      <td className="py-1.5 pr-2">{rotulo}</td>
+      <td colSpan={3} className="py-1.5 pr-2 text-xs italic">
+        {motivo}
+      </td>
+      <td className="py-1.5 text-right tabular-nums">—</td>
+    </tr>
   );
 }
 

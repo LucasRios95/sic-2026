@@ -210,6 +210,8 @@ export interface TaxSimulationItem {
   modoAnoTesteIbsCbs?: boolean;
   /** Nomes das calculadoras que se aplicaram ao item ('icms-proprio', 'icms-st', …). */
   calculadorasAplicadas: string[];
+  /** Calculadoras que não se aplicaram ao item → motivo (vem do motor). */
+  calculadorasNaoAplicadas?: Record<string, string>;
   /** Códigos efetivos do item (regra vigente + override de CST/CSOSN da tela). */
   codigos: {
     cstIcms: string | null;

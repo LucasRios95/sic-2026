@@ -29,9 +29,15 @@ export class CalculadoraIpi implements ICalculadoraTributo {
   readonly nome = 'ipi';
 
   aplica(contexto: ContextoCalculo, item: ItemContexto): boolean {
-    if (!contexto.empresa.flags.usaIpi) return false;
-    if (contexto.empresa.crt !== CodigoRegimeTributario.REGIME_NORMAL) return false;
-    return Boolean(item.taxRule.cstIpi);
+    return this.motivoNaoAplica(contexto, item) === null;
+  }
+
+  motivoNaoAplica(contexto: ContextoCalculo, item: ItemContexto): string | null {
+    if (!contexto.empresa.flags.usaIpi) return 'IPI desligado na configuração da empresa';
+    if (contexto.empresa.crt !== CodigoRegimeTributario.REGIME_NORMAL) {
+      return 'Simples Nacional não destaca IPI';
+    }
+    return item.taxRule.cstIpi ? null : 'Produto sem CST de IPI na regra tributária';
   }
 
   async calcular(_contexto: ContextoCalculo, item: ItemContexto): Promise<CalculadoraSlice> {

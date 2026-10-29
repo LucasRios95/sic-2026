@@ -95,6 +95,7 @@ export class MotorTributario {
       itemId: item.itemId,
       valorTotal,
       calculadorasAplicadas: [],
+      calculadorasNaoAplicadas: {},
       codigos: {
         cstIcms: item.taxRule.cstIcms ?? null,
         csosnIcms: item.taxRule.csosnIcms ?? null,
@@ -107,7 +108,11 @@ export class MotorTributario {
     };
 
     for (const calc of this.calculadoras) {
-      if (!calc.aplica(contexto, item)) continue;
+      const motivo = calc.motivoNaoAplica(contexto, item);
+      if (motivo) {
+        result.calculadorasNaoAplicadas[calc.nome] = motivo;
+        continue;
+      }
       result.calculadorasAplicadas.push(calc.nome);
       const slice = await calc.calcular(contexto, item, result);
       Object.assign(result, slice.campos);

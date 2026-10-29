@@ -39,8 +39,17 @@ export class CalculadoraCreditoSimples implements ICalculadoraTributo {
   ) {}
 
   aplica(contexto: ContextoCalculo, item: ItemContexto): boolean {
-    if (contexto.empresa.crt === CodigoRegimeTributario.REGIME_NORMAL) return false;
-    return CSOSN_COM_CREDITO.includes(item.taxRule.csosnIcms ?? '');
+    return this.motivoNaoAplica(contexto, item) === null;
+  }
+
+  motivoNaoAplica(contexto: ContextoCalculo, item: ItemContexto): string | null {
+    if (contexto.empresa.crt === CodigoRegimeTributario.REGIME_NORMAL) {
+      return 'Só para empresa do Simples Nacional';
+    }
+    const csosn = item.taxRule.csosnIcms;
+    return CSOSN_COM_CREDITO.includes(csosn ?? '')
+      ? null
+      : `CSOSN ${csosn ?? '(vazio)'} sem permissão de crédito`;
   }
 
   async calcular(contexto: ContextoCalculo, item: ItemContexto): Promise<CalculadoraSlice> {

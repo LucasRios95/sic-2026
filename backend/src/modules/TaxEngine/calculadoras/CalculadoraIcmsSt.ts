@@ -58,14 +58,22 @@ export class CalculadoraIcmsSt implements ICalculadoraTributo {
   ) {}
 
   aplica(contexto: ContextoCalculo, item: ItemContexto): boolean {
-    if (!contexto.empresa.flags.usaIcmsSt) return false;
+    return this.motivoNaoAplica(contexto, item) === null;
+  }
+
+  motivoNaoAplica(contexto: ContextoCalculo, item: ItemContexto): string | null {
+    if (!contexto.empresa.flags.usaIcmsSt) return 'ICMS-ST desligado na configuração da empresa';
     const { csosnIcms, cstIcms, cstIcmsSt } = item.taxRule;
     // Só aplica quando o grupo de ICMS do item comporta ST calculada nesta operação.
     // CSOSN 500 / CST 60 são ST já retida antes: calcular aqui somava vST no total sem
     // existir no item (cStat 534) e inflava o vNF.
-    if (csosnIcms) return CSOSN_COM_ST.includes(csosnIcms);
-    if (!cstIcmsSt) return false;
-    return !cstIcms || CST_COM_ST.includes(cstIcms.padStart(2, '0'));
+    if (csosnIcms) {
+      return CSOSN_COM_ST.includes(csosnIcms) ? null : `CSOSN ${csosnIcms} sem ST calculada na nota`;
+    }
+    if (!cstIcmsSt) return 'Produto sem CST de ICMS-ST na regra tributária';
+    return !cstIcms || CST_COM_ST.includes(cstIcms.padStart(2, '0'))
+      ? null
+      : `CST ${cstIcms} sem ST calculada na nota`;
   }
 
   async calcular(

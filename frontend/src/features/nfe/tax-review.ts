@@ -1,4 +1,4 @@
-import { parseDecimal } from '@/lib/format';
+import { formatDecimal, parseDecimal } from '@/lib/format';
 import type { TaxSimulationItem } from '@/shared/types/fiscal';
 
 import type { AjustesTributarios } from './nfe-api';
@@ -217,6 +217,43 @@ export const TRIBUTOS: TributoDef[] = [
     bloqueio: bloqueioIbsCbs,
   },
 ];
+
+/** Linha só de leitura do modal: valores que o motor apura, mas o faturista não ajusta. */
+export interface InformativoDef {
+  id: string;
+  rotulo: string;
+  calculadora: string;
+  valor: CampoResultado;
+  /** Texto das colunas do meio (ex.: parcelas federal/estadual). */
+  detalhe?: (r: TaxSimulationItem) => string | null;
+  /** Só aparece quando houver valor (ex.: desoneração é exceção, não regra). */
+  somenteComValor?: boolean;
+}
+
+export const INFORMATIVOS: InformativoDef[] = [
+  {
+    id: 'icmsDeson',
+    rotulo: 'ICMS desonerado',
+    calculadora: 'icms-proprio',
+    valor: 'valorIcmsDeson',
+    somenteComValor: true,
+  },
+  {
+    id: 'totTrib',
+    rotulo: 'Tributos aprox. (Lei 12.741)',
+    calculadora: 'tributos-aproximados',
+    valor: 'valorTotTrib',
+    detalhe: (r) =>
+      r.valorTotTrib
+        ? `Federal R$ ${formatDecimal(r.valorTotTribFederal)} · Estadual R$ ${formatDecimal(r.valorTotTribEstadual)}`
+        : null,
+  },
+];
+
+/** Motivo do motor para o tributo não se aplicar ao item (fallback genérico). */
+export function motivoNaoAplica(r: TaxSimulationItem, calculadora: string): string {
+  return r.calculadorasNaoAplicadas?.[calculadora] ?? 'Não se aplica a este item';
+}
 
 /** Decimal não negativo no formato da API, depois de normalizar o texto BR. */
 const DECIMAL_NAO_NEGATIVO = /^\d+(\.\d+)?$/;

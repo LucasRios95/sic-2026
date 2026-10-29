@@ -36,8 +36,12 @@ export class CalculadoraIbsCbs implements ICalculadoraTributo {
     private readonly taxParam: ITaxParameterRepository,
   ) {}
 
-  aplica(_contexto: ContextoCalculo, item: ItemContexto): boolean {
-    return Boolean(item.taxRule.cstIbsCbs);
+  aplica(contexto: ContextoCalculo, item: ItemContexto): boolean {
+    return this.motivoNaoAplica(contexto, item) === null;
+  }
+
+  motivoNaoAplica(_contexto: ContextoCalculo, item: ItemContexto): string | null {
+    return item.taxRule.cstIbsCbs ? null : 'Produto sem CST de IBS/CBS na regra tributária';
   }
 
   async calcular(contexto: ContextoCalculo, item: ItemContexto): Promise<CalculadoraSlice> {

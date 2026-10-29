@@ -35,6 +35,12 @@ export interface ICalculadoraTributo {
   aplica(contexto: ContextoCalculo, item: ItemContexto): boolean;
 
   /**
+   * Por que a calculadora NÃO se aplica ao item (null = aplica). Fonte única da regra:
+   * `aplica()` é derivado daqui. O motivo vai para a tela de conferência de impostos.
+   */
+  motivoNaoAplica(contexto: ContextoCalculo, item: ItemContexto): string | null;
+
+  /**
    * Calcula o slice de resultado para o item. Pode fazer I/O (consultar repositórios
    * de tabelas globais). O caller já garantiu `aplica() === true`.
    *

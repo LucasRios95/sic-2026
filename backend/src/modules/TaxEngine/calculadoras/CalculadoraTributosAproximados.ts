@@ -38,8 +38,12 @@ export class CalculadoraTributosAproximados implements ICalculadoraTributo {
     private readonly taxParam: ITaxParameterRepository,
   ) {}
 
-  aplica(contexto: ContextoCalculo, _item: ItemContexto): boolean {
-    return contexto.destinatario.consumidorFinal;
+  aplica(contexto: ContextoCalculo, item: ItemContexto): boolean {
+    return this.motivoNaoAplica(contexto, item) === null;
+  }
+
+  motivoNaoAplica(contexto: ContextoCalculo, _item: ItemContexto): string | null {
+    return contexto.destinatario.consumidorFinal ? null : 'Só em venda a consumidor final';
   }
 
   async calcular(

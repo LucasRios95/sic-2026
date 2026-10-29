@@ -47,18 +47,24 @@ export class CalculadoraIcmsProprio implements ICalculadoraTributo {
   ) {}
 
   aplica(contexto: ContextoCalculo, item: ItemContexto): boolean {
-    if (!contexto.empresa.flags.usaIcms) return false;
+    return this.motivoNaoAplica(contexto, item) === null;
+  }
+
+  motivoNaoAplica(contexto: ContextoCalculo, item: ItemContexto): string | null {
+    if (!contexto.empresa.flags.usaIcms) return 'ICMS desligado na configuração da empresa';
     // Simples Nacional NÃO destaca ICMS próprio: o item vira grupo ICMSSN (CSOSN) e o
     // imposto é recolhido no DAS. Logo ICMSTot.vICMS tem que ser 0 — se calcularmos aqui,
     // o total diverge do somatório dos itens (item ICMSSN não tem vICMS) e a SEFAZ rejeita
     // com cStat 532. O crédito do SN (CSOSN 101/201) é outro conceito (vCredICMSSN), não
     // entra no vICMS e fica para uma calculadora dedicada.
-    if (item.taxRule.csosnIcms) return false;
+    if (item.taxRule.csosnIcms) return 'Simples Nacional: ICMS próprio recolhido no DAS, sem destaque';
     // CST sem ICMS próprio no grupo (30/40/41/50/60): nada a destacar. Antes calculávamos
     // em operação interestadual (alíquota da tabela) e o vICMS ia para o total sem existir
     // no item. CST ausente (regra incompleta) segue calculando — a emissão já barra isso.
     const cst = item.taxRule.cstIcms;
-    return !cst || CST_COM_ICMS_PROPRIO.includes(cst.padStart(2, '0'));
+    return !cst || CST_COM_ICMS_PROPRIO.includes(cst.padStart(2, '0'))
+      ? null
+      : `CST ${cst} sem ICMS próprio`;
   }
 
   async calcular(

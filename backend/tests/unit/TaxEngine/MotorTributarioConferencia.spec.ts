@@ -266,6 +266,23 @@ describe('MotorTributario — ajustes manuais da conferência', () => {
     expect(digitada.itens[0].valorIcmsST).toBe('24.00');
   });
 
+  it('informa por que cada tributo não se aplica ao item', async () => {
+    const r = await buildMotor().calcular(
+      ctx([item({ csosnIcms: '202', cstPis: '49' })], {
+        crt: CodigoRegimeTributario.SIMPLES_NACIONAL,
+        ufDestino: 'MG',
+        flags: { usaIcmsSt: false },
+      }),
+    );
+    const motivos = r.itens[0].calculadorasNaoAplicadas;
+    expect(motivos['icms-st']).toBe('ICMS-ST desligado na configuração da empresa');
+    expect(motivos['icms-proprio']).toMatch(/Simples Nacional/);
+    expect(motivos['ibs-cbs']).toBe('Produto sem CST de IBS/CBS na regra tributária');
+    expect(motivos.difal).toBe('Destinatário não é consumidor final');
+    expect(motivos['pis-cofins']).toBeUndefined();
+    expect(r.itens[0].calculadorasAplicadas).toContain('pis-cofins');
+  });
+
   it('ajuste não liga tributo que não se aplica ao CST', async () => {
     const r = await buildMotor().calcular(
       ctx([item({ cstIcms: '41' }, { ajustes: { icms: { base: '100', aliquota: '18' } } })]),

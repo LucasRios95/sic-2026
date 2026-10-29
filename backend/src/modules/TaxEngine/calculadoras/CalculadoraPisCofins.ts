@@ -40,8 +40,14 @@ export class CalculadoraPisCofins implements ICalculadoraTributo {
     private readonly taxParam: ITaxParameterRepository,
   ) {}
 
-  aplica(_contexto: ContextoCalculo, item: ItemContexto): boolean {
-    return Boolean(item.taxRule.cstPis || item.taxRule.cstCofins);
+  aplica(contexto: ContextoCalculo, item: ItemContexto): boolean {
+    return this.motivoNaoAplica(contexto, item) === null;
+  }
+
+  motivoNaoAplica(_contexto: ContextoCalculo, item: ItemContexto): string | null {
+    return item.taxRule.cstPis || item.taxRule.cstCofins
+      ? null
+      : 'Produto sem CST de PIS/COFINS na regra tributária';
   }
 
   async calcular(

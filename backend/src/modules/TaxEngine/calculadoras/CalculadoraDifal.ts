@@ -16,12 +16,14 @@ import { ITaxParameterRepository } from '../repositories/ITaxParameterRepository
  * (idDest=2, indFinal=1, indIEDest=9). Para contribuinte (uso/consumo) o DIFAL é
  * recolhido pelo próprio destinatário e informar o grupo é rejeição.
  */
-function aplicaPartilhaUfDestino(contexto: ContextoCalculo): boolean {
-  return (
-    contexto.destinatario.consumidorFinal &&
-    contexto.destinatario.indicadorIE === IndicadorIE.NAO_CONTRIBUINTE &&
-    contexto.empresa.uf !== contexto.destinatario.uf
-  );
+/** Por que a operação não tem partilha com a UF destino (null = tem). */
+function motivoSemPartilhaUfDestino(contexto: ContextoCalculo): string | null {
+  if (contexto.empresa.uf === contexto.destinatario.uf) return 'Operação interna';
+  if (!contexto.destinatario.consumidorFinal) return 'Destinatário não é consumidor final';
+  if (contexto.destinatario.indicadorIE !== IndicadorIE.NAO_CONTRIBUINTE) {
+    return 'Destinatário contribuinte do ICMS';
+  }
+  return null;
 }
 
 /** Base do DIFAL/FCP destino: valor da operação + IPI (consumidor final sempre o suporta). */
@@ -76,9 +78,13 @@ export class CalculadoraDifal implements ICalculadoraTributo {
     private readonly taxParam: ITaxParameterRepository,
   ) {}
 
-  aplica(contexto: ContextoCalculo, _item: ItemContexto): boolean {
-    if (!contexto.empresa.flags.usaDifal) return false;
-    return aplicaPartilhaUfDestino(contexto);
+  aplica(contexto: ContextoCalculo, item: ItemContexto): boolean {
+    return this.motivoNaoAplica(contexto, item) === null;
+  }
+
+  motivoNaoAplica(contexto: ContextoCalculo, _item: ItemContexto): string | null {
+    if (!contexto.empresa.flags.usaDifal) return 'DIFAL desligado na configuração da empresa';
+    return motivoSemPartilhaUfDestino(contexto);
   }
 
   /** A UF de destino exige base dupla? Parâmetro por UF (empresa sobrescreve o global). */
@@ -197,9 +203,13 @@ export class CalculadoraFcpDestino implements ICalculadoraTributo {
     private readonly icmsInterna: IIcmsInternaUfRepository,
   ) {}
 
-  aplica(contexto: ContextoCalculo, _item: ItemContexto): boolean {
-    if (!contexto.empresa.flags.usaFcp) return false;
-    return aplicaPartilhaUfDestino(contexto);
+  aplica(contexto: ContextoCalculo, item: ItemContexto): boolean {
+    return this.motivoNaoAplica(contexto, item) === null;
+  }
+
+  motivoNaoAplica(contexto: ContextoCalculo, _item: ItemContexto): string | null {
+    if (!contexto.empresa.flags.usaFcp) return 'FCP desligado na configuração da empresa';
+    return motivoSemPartilhaUfDestino(contexto);
   }
 
   async calcular(

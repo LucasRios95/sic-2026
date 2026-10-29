@@ -105,6 +105,8 @@ export interface ResultadoCalculoItem {
    * tributos podem ser ajustados manualmente.
    */
   calculadorasAplicadas: string[];
+  /** Calculadoras que não se aplicaram ao item → motivo, para a tela de conferência. */
+  calculadorasNaoAplicadas: Record<string, string>;
   /** Códigos fiscais efetivos do item (regra vigente + override da nota), para conferência. */
   codigos: {
     cstIcms: string | null;
