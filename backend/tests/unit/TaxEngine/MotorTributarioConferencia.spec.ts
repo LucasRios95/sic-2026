@@ -283,6 +283,27 @@ describe('MotorTributario — ajustes manuais da conferência', () => {
     expect(r.itens[0].calculadorasAplicadas).toContain('pis-cofins');
   });
 
+  it('IBS/CBS sem CST no produto: informativo na prévia, fora da emissão', async () => {
+    const params = {
+      'ibs.aliquota.padrao': { aliquota: '0.1000', modo: 'ANO_TESTE' },
+      'cbs.aliquota.padrao': { aliquota: '0.9000', modo: 'ANO_TESTE' },
+    };
+    const contexto = ctx([item({ csosnIcms: '102' })], {
+      crt: CodigoRegimeTributario.SIMPLES_NACIONAL,
+    });
+
+    const previa = await buildMotor(params).calcular({ ...contexto, somentePrevia: true });
+    // 100 × 0,1% = 0,10; 100 × 0,9% = 0,90 — sem CST, que é o que leva o grupo ao XML.
+    expect(previa.itens[0].valorIbs).toBe('0.10');
+    expect(previa.itens[0].valorCbs).toBe('0.90');
+    expect(previa.itens[0].cstIbsCbs).toBeUndefined();
+    expect(previa.itens[0].warnings.join(' ')).toMatch(/informativo/);
+
+    const emissao = await buildMotor(params).calcular(contexto);
+    expect(emissao.itens[0].valorIbs).toBeUndefined();
+    expect(emissao.totais.valorIbs).toBe('0.00');
+  });
+
   it('ajuste não liga tributo que não se aplica ao CST', async () => {
     const r = await buildMotor().calcular(
       ctx([item({ cstIcms: '41' }, { ajustes: { icms: { base: '100', aliquota: '18' } } })]),

@@ -95,4 +95,9 @@ export interface ContextoCalculo {
   empresa: EmpresaContexto;
   destinatario: DestinatarioContexto;
   itens: ItemContexto[];
+  /**
+   * Cálculo só para a prévia da tela (POST /tax/simulate), não para o XML. Liga valores
+   * informativos que a emissão não leva — hoje, o IBS/CBS de produto sem CST cadastrado.
+   */
+  somentePrevia?: boolean;
 }

@@ -143,6 +143,7 @@ export class SimulateTaxUseCase {
         codigoPais: request.destinatario.codigoPais ?? '1058',
       },
       itens: itensCtx,
+      somentePrevia: true,
     };
 
     return this.motor.calcular(contexto);

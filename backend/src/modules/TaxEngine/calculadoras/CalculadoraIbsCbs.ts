@@ -40,13 +40,21 @@ export class CalculadoraIbsCbs implements ICalculadoraTributo {
     return this.motivoNaoAplica(contexto, item) === null;
   }
 
-  motivoNaoAplica(_contexto: ContextoCalculo, item: ItemContexto): string | null {
-    return item.taxRule.cstIbsCbs ? null : 'Produto sem CST de IBS/CBS na regra tributária';
+  motivoNaoAplica(contexto: ContextoCalculo, item: ItemContexto): string | null {
+    // Na prévia o IBS/CBS aparece sempre (informativo); na emissão só com CST cadastrado,
+    // porque sem CST o item não leva o grupo IBSCBS no XML.
+    if (item.taxRule.cstIbsCbs || contexto.somentePrevia) return null;
+    return 'Produto sem CST de IBS/CBS na regra tributária';
   }
 
   async calcular(contexto: ContextoCalculo, item: ItemContexto): Promise<CalculadoraSlice> {
     const rule = item.taxRule;
     const warnings: string[] = [];
+    if (!rule.cstIbsCbs) {
+      warnings.push(
+        'IBS/CBS informativo: produto sem CST de IBS/CBS — calculado com as alíquotas padrão só para conferência; não vai no XML.',
+      );
+    }
 
     // CSTs que não tributam mas precisam ser destacadas no XML.
     const cstSemTributacao = ['ISENCAO', 'IMUNIDADE', 'NAO_INCIDENCIA'];
@@ -65,7 +73,7 @@ export class CalculadoraIbsCbs implements ICalculadoraTributo {
       };
     }
 
-    if (!rule.cClassTrib) {
+    if (rule.cstIbsCbs && !rule.cClassTrib) {
       warnings.push(
         'cClassTrib ausente na regra do produto — campo obrigatório para IBS/CBS conforme RT 2025.002',
       );
