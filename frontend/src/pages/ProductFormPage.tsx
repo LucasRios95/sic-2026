@@ -761,6 +761,9 @@ function EditProductForm({ productId }: { productId: string }): React.ReactEleme
                         <option value="103">103 — Isenção do ICMS (faixa de receita)</option>
                         <option value="201">201 — Tributada SN com permissão + ICMS-ST</option>
                         <option value="202">202 — Tributada SN sem permissão + ICMS-ST</option>
+                        <option value="203">203 — Isenção do ICMS (faixa de receita) + ICMS-ST</option>
+                        <option value="300">300 — Imune</option>
+                        <option value="400">400 — Não tributada pelo Simples Nacional</option>
                         <option value="500">500 — ICMS cobrado anteriormente por ST</option>
                         <option value="900">900 — Outros</option>
                       </Select>
